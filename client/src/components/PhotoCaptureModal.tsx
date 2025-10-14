@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import Spinner from "./Spinner";
 
 type Props = {
   open: boolean;
@@ -99,7 +100,19 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
       }
     } catch (e: any) { 
       console.error("Camera start error:", e);
-      setErr(e?.message ?? "Could not start camera"); 
+      let message = "Could not start camera";
+      
+      if (e?.name === "NotAllowedError" || e?.name === "PermissionDeniedError") {
+        message = "Camera access denied. Please allow camera permissions in your browser settings.";
+      } else if (e?.name === "NotFoundError" || e?.name === "DevicesNotFoundError") {
+        message = "No camera found. Please connect a camera and try again.";
+      } else if (e?.name === "NotReadableError" || e?.name === "TrackStartError") {
+        message = "Camera is already in use by another application.";
+      } else if (e?.message) {
+        message = e.message;
+      }
+      
+      setErr(message); 
     }
   };
 
@@ -130,12 +143,25 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
   const save = async () => {
     if (!snapshot) return;
     setSaving(true);
+    setErr("");
+    
     try {
       const blob = await (await fetch(snapshot)).blob();
+      
+      // Validate blob size (10MB limit)
+      if (blob.size > 10 * 1024 * 1024) {
+        throw new Error('Photo size exceeds 10MB limit');
+      }
+      
       const form = new FormData();
       form.append("file", blob, `capture-${Date.now()}.jpg`);
       const r = await fetch(`/api/items/${encodeURIComponent(itemId)}/photos`, { method: "POST", body: form });
-      if (!r.ok) throw new Error(`Upload failed ${r.status}`);
+      
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errorData.error || `Upload failed (${r.status})`);
+      }
+      
       const photo = await r.json();
       onSaved(photo);
       setSnapshot("");
@@ -147,7 +173,8 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
         await start(selected);
       }
     } catch (e: any) {
-      setErr(e?.message ?? "Save failed");
+      const message = e?.message ?? "Failed to save photo";
+      setErr(message);
     } finally {
       setSaving(false);
     }
@@ -282,7 +309,20 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
                 
                 if (selected) await start(selected);
               }} style={btnSecondary}>Retake</button>
-              <button onClick={save} disabled={saving} style={btn}>{saving ? "Saving…" : "Save to Gallery"}</button>
+              <button 
+                onClick={save} 
+                disabled={saving} 
+                style={{
+                  ...btn,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                {saving && <Spinner size={16} color="#ffffff" />}
+                {saving ? "Saving…" : "Save to Gallery"}
+              </button>
             </div>
           </div>
         )}

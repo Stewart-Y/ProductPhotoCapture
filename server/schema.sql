@@ -33,3 +33,5 @@ CREATE TABLE IF NOT EXISTS photos (
   created_at TEXT NOT NULL,
   FOREIGN KEY (item_id) REFERENCES items(id)
 );
+
+CREATE INDEX IF NOT EXISTS photos_item_idx ON photos(item_id, created_at DESC);

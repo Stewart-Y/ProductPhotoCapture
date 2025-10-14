@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchItem, fetchPhotos, updateItem, uploadItemImage, type Item, type Photo } from "../lib/api";
+import { fetchItem, fetchPhotos, updateItem, type Item, type Photo } from "../lib/api";
 import Header from "../components/Header";
 import PhotoCaptureModal from "../components/PhotoCaptureModal";
 import PhotoGallery from "../components/PhotoGallery";
+import PhotoGridModal from "../components/PhotoGridModal";
+import LoadingOverlay from "../components/LoadingOverlay";
+import Spinner from "../components/Spinner";
 
 const styles = {
   container: {
@@ -143,6 +146,9 @@ export default function ItemPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
+  const [gridOpen, setGridOpen] = useState(false);
+  const [imageKey, setImageKey] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -190,13 +196,36 @@ export default function ItemPage() {
     setSuccess("");
     
     try {
-      const updated = await uploadItemImage(id, file);
-      setItem(updated);
-      setFormData(updated);
-      setSuccess("Image uploaded successfully!");
+      // Validate file size (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('File size must be less than 10MB');
+      }
+      
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        throw new Error('File must be an image (JPEG, PNG, etc.)');
+      }
+      
+      const formData = new FormData();
+      formData.append('image', file); // Note: field name is 'image' for main item image
+      const r = await fetch(`/api/items/${id}/upload-image`, { 
+        method: 'POST', 
+        body: formData 
+      });
+      
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errorData.error || `Upload failed with status ${r.status}`);
+      }
+      
+      const updatedItem = await r.json();
+      setItem(updatedItem);
+      setImageKey(prev => prev + 1); // Force image reload
+      setSuccess("Main image updated successfully!");
       setTimeout(() => setSuccess(""), 3000);
     } catch (error) {
-      setErr(String(error));
+      const message = error instanceof Error ? error.message : 'Failed to upload image';
+      setErr(message);
     } finally {
       setUploading(false);
     }
@@ -206,25 +235,152 @@ export default function ItemPage() {
     fileInputRef.current?.click();
   };
 
-  const handlePhotoSaved = (photo: Photo) => {
+  const handlePhotoSaved = async (photo: Photo) => {
+    // If we have 4 photos, delete the oldest one first
+    if (photos.length >= 4 && id) {
+      const oldestPhoto = photos[photos.length - 1];
+      try {
+        const r = await fetch(`/api/items/${id}/photos/${oldestPhoto.id}`, { method: "DELETE" });
+        if (!r.ok) {
+          throw new Error('Failed to delete oldest photo to make room');
+        }
+        setPhotos(prev => prev.slice(0, -1)); // Remove the oldest
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to replace oldest photo';
+        setErr(message);
+        console.error("Failed to delete oldest photo:", error);
+        return; // Don't add new photo if we couldn't delete the old one
+      }
+    }
+    
     setPhotos(prev => [photo, ...prev]);
     setSuccess("Photo saved successfully!");
     setTimeout(() => setSuccess(""), 3000);
   };
 
+  const handleSetMainImage = async (photo: Photo) => {
+    if (!id) return;
+    
+    setLoadingMessage("Setting as main image...");
+    
+    try {
+      console.log('🔥 handleSetMainImage called with:', { id, photoUrl: photo.url, fileName: photo.file_name });
+      
+      // Fetch the photo as a blob
+      const response = await fetch(photo.url);
+      const blob = await response.blob();
+      console.log('📦 Blob created:', { size: blob.size, type: blob.type });
+      
+      // Create FormData and upload as main image
+      const formData = new FormData();
+      formData.append('image', blob, photo.file_name);
+      
+      const uploadUrl = `/api/items/${id}/upload-image`;
+      console.log('🚀 Uploading to:', uploadUrl);
+      
+      const r = await fetch(uploadUrl, { 
+        method: 'POST', 
+        body: formData 
+      });
+      
+      console.log('📨 Response status:', r.status, r.statusText);
+      
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ error: 'Upload failed' }));
+        console.error('❌ Upload failed:', errorData);
+        throw new Error(errorData.error || `Failed to set main image (${r.status})`);
+      }
+      
+      const updatedItem = await r.json();
+      console.log('✅ Upload successful, updated item:', updatedItem);
+      setItem(updatedItem);
+      setImageKey(prev => prev + 1); // Force image reload
+      setGridOpen(false);
+      setSuccess("Main image updated successfully!");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (error) {
+      console.error('💥 Error in handleSetMainImage:', error);
+      const message = error instanceof Error ? error.message : 'Failed to set main image';
+      setErr(message);
+      setTimeout(() => setErr(""), 5000);
+    } finally {
+      setLoadingMessage("");
+    }
+  };
+
+  const handlePhotoReorder = async (photoIds: string[]) => {
+    if (!id) return;
+    
+    // Optimistic update - reorder in UI immediately
+    const reorderedPhotos = photoIds.map(photoId => 
+      photos.find(p => p.id === photoId)!
+    ).filter(Boolean);
+    setPhotos(reorderedPhotos);
+    
+    setLoadingMessage("Saving new order...");
+    
+    try {
+      const r = await fetch(`/api/items/${id}/photos/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoIds })
+      });
+      
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ error: 'Failed to reorder photos' }));
+        throw new Error(errorData.error || 'Failed to save new photo order');
+      }
+    } catch (error) {
+      console.error('Reorder error:', error);
+      const message = error instanceof Error ? error.message : 'Failed to reorder photos';
+      setErr(message);
+      setTimeout(() => setErr(""), 5000);
+      
+      // Refetch to get correct order
+      try {
+        const r = await fetch(`/api/items/${id}/photos`);
+        if (r.ok) {
+          const data = await r.json();
+          setPhotos(data);
+        }
+      } catch (refetchError) {
+        console.error('Failed to refetch photos:', refetchError);
+      }
+    } finally {
+      setLoadingMessage("");
+    }
+  };
+
   const handlePhotoDelete = async (photoId: string) => {
     if (!id) return;
+    
+    // Optimistic update - remove from UI immediately
+    const prev = photos;
+    setPhotos(p => p.filter(x => x.id !== photoId));
+    
+    setLoadingMessage("Deleting photo...");
+    
     try {
       const r = await fetch(`/api/items/${id}/photos/${photoId}`, { method: "DELETE" });
       if (r.ok) {
-        setPhotos(prev => prev.filter(p => p.id !== photoId));
         setSuccess("Photo deleted successfully!");
         setTimeout(() => setSuccess(""), 3000);
       } else {
-        setErr("Failed to delete photo");
+        // Revert on error
+        setPhotos(prev);
+        const errorData = await r.json().catch(() => ({ error: 'Failed to delete photo' }));
+        const message = errorData.error || `Delete failed (${r.status})`;
+        setErr(message);
+        setTimeout(() => setErr(""), 5000);
       }
     } catch (error) {
-      setErr(String(error));
+      // Revert on error
+      setPhotos(prev);
+      const message = error instanceof Error ? error.message : 'Network error while deleting photo';
+      setErr(message);
+      setTimeout(() => setErr(""), 5000);
+    } finally {
+      setLoadingMessage("");
     }
   };
 
@@ -273,8 +429,68 @@ export default function ItemPage() {
         </h1>
       </div>
 
-      {err && <div style={{ color: "#ef4444", padding: '16px 32px', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444', margin: '0 32px 24px' }}>{err}</div>}
-      {success && <div style={{ color: "#059669", padding: '16px 32px', backgroundColor: '#d1fae5', borderLeft: '4px solid #059669', margin: '0 32px 24px' }}>{success}</div>}
+      {err && (
+        <div style={{ 
+          color: "#dc2626", 
+          padding: '16px 32px', 
+          backgroundColor: '#fef2f2', 
+          borderLeft: '4px solid #ef4444', 
+          margin: '0 32px 24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderRadius: '4px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        }}>
+          <div>
+            <strong style={{ fontWeight: '600' }}>❌ Error: </strong>
+            {err}
+          </div>
+          <button
+            onClick={() => setErr("")}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#dc2626',
+              fontSize: '20px',
+              cursor: 'pointer',
+              padding: '0 8px',
+              lineHeight: '1'
+            }}
+          >×</button>
+        </div>
+      )}
+      {success && (
+        <div style={{ 
+          color: "#059669", 
+          padding: '16px 32px', 
+          backgroundColor: '#d1fae5', 
+          borderLeft: '4px solid #10b981', 
+          margin: '0 32px 24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderRadius: '4px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        }}>
+          <div>
+            <strong style={{ fontWeight: '600' }}>✅ Success: </strong>
+            {success}
+          </div>
+          <button
+            onClick={() => setSuccess("")}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#059669',
+              fontSize: '20px',
+              cursor: 'pointer',
+              padding: '0 8px',
+              lineHeight: '1'
+            }}
+          >×</button>
+        </div>
+      )}
 
       <div style={styles.content}>
         <div style={{ display: 'flex', gap: '24px' }}>
@@ -293,7 +509,7 @@ export default function ItemPage() {
                 
                 <div style={styles.imageBox}>
                   {formData.image_url ? (
-                    <img src={formData.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
+                    <img key={imageKey} src={formData.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                   ) : photos.length > 0 ? (
                     <img src={photos[0].url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                   ) : (
@@ -325,12 +541,17 @@ export default function ItemPage() {
                       fontSize: '14px',
                       fontWeight: '600',
                       cursor: uploading ? 'not-allowed' : 'pointer',
-                      opacity: uploading ? 0.7 : 1
+                      opacity: uploading ? 0.7 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
                     }}
                   >
-                    {uploading ? '⏳ Uploading...' : 'Choose file'}
+                    {uploading && <Spinner size={16} color="#ffffff" />}
+                    {uploading ? 'Uploading...' : 'Choose file'}
                   </button>
-                  <button 
+                  <button
                     onClick={() => setCamOpen(true)}
                     style={{
                       flex: 1,
@@ -344,7 +565,7 @@ export default function ItemPage() {
                       cursor: 'pointer'
                     }}
                   >
-                    📷 Take Photo
+                    📷 {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
                   </button>
                 </div>
 
@@ -352,9 +573,31 @@ export default function ItemPage() {
                 {photos.length > 0 && (
                   <div style={{ marginTop: '16px' }}>
                     <div style={{ fontSize: '14px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>
-                      Photo Gallery ({photos.length})
+                      Photo Gallery ({photos.length}/4)
                     </div>
-                    <PhotoGallery photos={photos} onDelete={handlePhotoDelete} />
+                    <PhotoGallery 
+                      photos={photos} 
+                      onDelete={handlePhotoDelete}
+                    />
+                    
+                    {/* Open Gallery Button */}
+                    <button
+                      onClick={() => setGridOpen(true)}
+                      style={{
+                        width: '100%',
+                        marginTop: '12px',
+                        padding: '10px',
+                        backgroundColor: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 Open Gallery
+                    </button>
                   </div>
                 )}
 
@@ -644,6 +887,20 @@ export default function ItemPage() {
           onSaved={handlePhotoSaved}
         />
       )}
+
+      {/* Photo Grid Modal */}
+      {gridOpen && (
+        <PhotoGridModal
+          photos={photos}
+          onClose={() => setGridOpen(false)}
+          onSetMainImage={handleSetMainImage}
+          onDelete={handlePhotoDelete}
+          onReorder={handlePhotoReorder}
+        />
+      )}
+      
+      {/* Loading Overlay */}
+      {loadingMessage && <LoadingOverlay message={loadingMessage} />}
     </div>
   );
 }

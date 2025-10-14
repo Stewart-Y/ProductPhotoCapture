@@ -17,40 +17,20 @@ app.use(express.json());
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
 const uploadDir = path.join(__dirname, 'uploads');
+const thumbDir = path.join(__dirname, 'uploads', 'thumbnails');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+if (!fs.existsSync(thumbDir)) {
+  fs.mkdirSync(thumbDir, { recursive: true });
+}
 
-// Serve uploaded files statically
 app.use('/uploads', express.static(uploadDir));
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const filename = `${nanoid()}${ext}`;
-    cb(null, filename);
-  }
-});
-
 const upload = multer({ 
-  storage,
-  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp|bmp|svg/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-    cb(new Error('Only image files are allowed!'));
-  }
+  dest: uploadDir,
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 // Health
@@ -69,7 +49,7 @@ app.get('/api/items/:id', (req, res) => {
 });
 
 // Update item
-app.put('/api/items/:id', (req, res) => {
+app.put('/api/items/:id', express.json(), (req, res) => {
   const { id } = req.params;
   const {
     name, sku, brand, year, category, size, subcategory, abv, weight,
@@ -125,8 +105,8 @@ app.put('/api/items/:id', (req, res) => {
   }
 });
 
-// Image upload endpoint
-app.post('/api/items/:id/upload-image', upload.single('image'), (req, res) => {
+// Image upload endpoint (main item image)
+app.post('/api/items/:id/upload-image', upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -134,7 +114,27 @@ app.post('/api/items/:id/upload-image', upload.single('image'), (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    const imageUrl = `/uploads/${req.file.filename}`;
+    const processedFilename = `item-${id}-${Date.now()}.jpg`;
+    const outputPath = path.join(uploadDir, processedFilename);
+
+    // Import sharp dynamically
+    const sharp = (await import('sharp')).default;
+    
+    // Process image: auto-orient, resize to max 1024px, convert to JPEG
+    await sharp(req.file.path)
+      .rotate() // auto-orient based on EXIF
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toFile(outputPath);
+
+    // Delete the original temp file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (err) {
+      console.error('Error deleting temp file:', err);
+    }
+    
+    const imageUrl = `/uploads/${processedFilename}`;
     
     // Update item with image URL
     const stmt = db.prepare('UPDATE items SET image_url = ? WHERE id = ?');
@@ -144,43 +144,85 @@ app.post('/api/items/:id/upload-image', upload.single('image'), (req, res) => {
     res.json(updated);
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({ error: 'Failed to upload image' });
+    res.status(500).json({ error: 'Failed to upload image', details: error.message });
   }
 });
 
 // Photos routes
 app.get('/api/items/:id/photos', (req, res) => {
-  const photos = db.prepare('SELECT id, item_id, url, file_name, created_at FROM photos WHERE item_id = ? ORDER BY created_at DESC').all(req.params.id);
-  res.json(photos);
+  const rows = db.prepare('SELECT * FROM photos WHERE item_id = ? ORDER BY position ASC, created_at ASC').all(req.params.id);
+  // Add thumb_url for each photo
+  const photosWithThumbs = rows.map(photo => ({
+    ...photo,
+    thumb_url: `/uploads/thumbnails/${photo.file_name.replace('.jpg', '_thumb.jpg')}`
+  }));
+  res.json(photosWithThumbs);
 });
 
-// CREATE photo
-app.post('/api/items/:id/photos', upload.single('file'), (req, res) => {
+app.post('/api/items/:id/photos', upload.single('file'), async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!req.file) return res.status(400).json({ error: 'file required' });
+    const { id: itemId } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ error: 'file required' });
+    }
 
     const photoId = nanoid();
-    const fileName = `${photoId}.jpg`; // normalize extension
-    const filePath = path.join(uploadDir, fileName);
-    
-    // rename Multer temp file -> our filename
-    fs.renameSync(req.file.path, filePath);
+    const processedFilename = `${photoId}.jpg`;
+    const thumbFilename = `${photoId}_thumb.jpg`;
+    const outputPath = path.join(uploadDir, processedFilename);
+    const thumbPath = path.join(thumbDir, thumbFilename);
 
-    // public URL (static /uploads is already served)
-    const url = `/uploads/${fileName}`;
-    const createdAt = new Date().toISOString();
+    // Import sharp dynamically
+    const sharp = (await import('sharp')).default;
+    
+    // Read and auto-orient the image
+    const image = sharp(req.file.path).rotate();
+    
+    // Generate full-size image (max 1024px)
+    await image
+      .clone()
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toFile(outputPath);
+    
+    // Generate thumbnail (240x240, cropped to fill)
+    await image
+      .clone()
+      .resize(240, 240, { fit: 'cover' })
+      .jpeg({ quality: 80 })
+      .toFile(thumbPath);
+
+    // Delete the original temp file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (err) {
+      console.error('Error deleting temp file:', err);
+    }
+
+    const url = `/uploads/${processedFilename}`;
+    const thumbUrl = `/uploads/thumbnails/${thumbFilename}`;
+    const now = new Date().toISOString();
+    
+    // Get the max position for this item and add 1
+    const maxPos = db.prepare('SELECT MAX(position) as max FROM photos WHERE item_id = ?').get(itemId);
+    const position = (maxPos.max ?? -1) + 1;
 
     db.prepare(`
-      INSERT INTO photos (id, item_id, url, file_name, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(photoId, id, url, fileName, createdAt);
+      INSERT INTO photos (id, item_id, url, file_name, created_at, position)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(photoId, itemId, url, processedFilename, now, position);
 
-    const row = db.prepare(`SELECT id, item_id, url, file_name, created_at FROM photos WHERE id = ?`).get(photoId);
-    res.status(201).json(row);
-  } catch (error) {
-    console.error('Photo upload error:', error);
-    res.status(500).json({ error: 'Failed to upload photo' });
+    res.status(201).json({
+      id: photoId,
+      item_id: itemId,
+      url,
+      thumb_url: thumbUrl,
+      file_name: processedFilename,
+      created_at: now
+    });
+  } catch (e) {
+    console.error('Upload error:', e);
+    res.status(500).json({ error: 'upload failed', details: e.message });
   }
 });
 
@@ -191,19 +233,54 @@ app.delete('/api/items/:id/photos/:photoId', (req, res) => {
     const row = db.prepare('SELECT file_name FROM photos WHERE id = ?').get(photoId);
     if (!row) return res.status(404).json({ error: 'not found' });
     
-    // Delete file from disk
-    try { 
-      fs.unlinkSync(path.join(uploadDir, row.file_name)); 
+    // Delete main photo
+    const filePath = path.join(uploadDir, row.file_name);
+    try {
+      fs.unlinkSync(filePath);
     } catch (err) {
-      console.warn('Could not delete file:', err);
+      console.error('Error deleting file:', err);
     }
     
-    // Delete from database
+    // Delete thumbnail
+    const thumbPath = path.join(thumbDir, row.file_name.replace('.jpg', '_thumb.jpg'));
+    try {
+      fs.unlinkSync(thumbPath);
+    } catch (err) {
+      console.error('Error deleting thumbnail:', err);
+    }
+    
     db.prepare('DELETE FROM photos WHERE id = ?').run(photoId);
     res.json({ ok: true });
   } catch (error) {
     console.error('Photo delete error:', error);
     res.status(500).json({ error: 'Failed to delete photo' });
+  }
+});
+
+// Update photo positions (for reordering)
+app.put('/api/items/:id/photos/reorder', (req, res) => {
+  try {
+    const { id: itemId } = req.params;
+    const { photoIds } = req.body; // Array of photo IDs in new order
+    
+    if (!Array.isArray(photoIds)) {
+      return res.status(400).json({ error: 'photoIds must be an array' });
+    }
+    
+    // Update position for each photo
+    const updateStmt = db.prepare('UPDATE photos SET position = ? WHERE id = ? AND item_id = ?');
+    const transaction = db.transaction((ids) => {
+      ids.forEach((photoId, index) => {
+        updateStmt.run(index, photoId, itemId);
+      });
+    });
+    
+    transaction(photoIds);
+    
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Reorder error:', error);
+    res.status(500).json({ error: 'Failed to reorder photos' });
   }
 });
 

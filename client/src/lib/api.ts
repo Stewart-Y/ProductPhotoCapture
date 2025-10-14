@@ -25,7 +25,7 @@ export type Item = {
   warehouse_column?: string | null;
 };
 
-export type Photo = { id: string; item_id: string; url: string; file_name: string; created_at: string };
+export type Photo = { id: string; item_id: string; url: string; thumb_url?: string; file_name: string; created_at: string };
 
 export async function fetchItems(): Promise<Item[]> {
   const r = await fetch('/api/items');

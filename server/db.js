@@ -61,6 +61,29 @@ try {
   console.error('Migration error:', err);
 }
 
+// Migration: Add position column to photos table
+try {
+  const photosColumns = db.prepare('PRAGMA table_info(photos)').all();
+  const photosColumnNames = photosColumns.map(col => col.name);
+  
+  if (!photosColumnNames.includes('position')) {
+    db.exec('ALTER TABLE photos ADD COLUMN position INTEGER DEFAULT 0');
+    console.log('Added position column to photos table');
+    
+    // Set initial positions based on created_at for existing photos
+    const items = db.prepare('SELECT DISTINCT item_id FROM photos').all();
+    items.forEach(({ item_id }) => {
+      const photos = db.prepare('SELECT id FROM photos WHERE item_id = ? ORDER BY created_at ASC').all(item_id);
+      photos.forEach((photo, index) => {
+        db.prepare('UPDATE photos SET position = ? WHERE id = ?').run(index, photo.id);
+      });
+    });
+    console.log('Initialized photo positions');
+  }
+} catch (err) {
+  console.error('Photos migration error:', err);
+}
+
 // Seed demo items if empty
 const count = db.prepare('SELECT COUNT(*) AS c FROM items').get().c;
 if (count === 0) {
