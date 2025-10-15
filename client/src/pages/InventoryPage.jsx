@@ -29,7 +29,7 @@ const styles = {
     backgroundColor: '#fafbfc'
   },
   searchInput: {
-    flex,
+    flex: 1,
     padding: '10px 16px',
     border: '1px solid #cbd5e1',
     borderRadius: '8px',
