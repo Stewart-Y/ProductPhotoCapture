@@ -220,6 +220,7 @@ export default function ItemPage() {
       
       const updatedItem = await r.json();
       setItem(updatedItem);
+      setFormData(updatedItem); // Update formData so the image_url changes
       setImageKey(prev => prev + 1); // Force image reload
       setSuccess("Main image updated successfully!");
       setTimeout(() => setSuccess(""), 3000);
@@ -264,36 +265,27 @@ export default function ItemPage() {
     setLoadingMessage("Setting as main image...");
     
     try {
-      console.log('🔥 handleSetMainImage called with:', { id, photoUrl: photo.url, fileName: photo.file_name });
+      console.log('🔥 handleSetMainImage called with:', { id, photoUrl: photo.url });
       
-      // Fetch the photo as a blob
-      const response = await fetch(photo.url);
-      const blob = await response.blob();
-      console.log('📦 Blob created:', { size: blob.size, type: blob.type });
-      
-      // Create FormData and upload as main image
-      const formData = new FormData();
-      formData.append('image', blob, photo.file_name);
-      
-      const uploadUrl = `/api/items/${id}/upload-image`;
-      console.log('🚀 Uploading to:', uploadUrl);
-      
-      const r = await fetch(uploadUrl, { 
-        method: 'POST', 
-        body: formData 
+      // Use the new endpoint that just updates the image_url without creating duplicates
+      const r = await fetch(`/api/items/${id}/set-main-image`, { 
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoUrl: photo.url })
       });
       
       console.log('📨 Response status:', r.status, r.statusText);
       
       if (!r.ok) {
-        const errorData = await r.json().catch(() => ({ error: 'Upload failed' }));
-        console.error('❌ Upload failed:', errorData);
+        const errorData = await r.json().catch(() => ({ error: 'Update failed' }));
+        console.error('❌ Update failed:', errorData);
         throw new Error(errorData.error || `Failed to set main image (${r.status})`);
       }
       
       const updatedItem = await r.json();
-      console.log('✅ Upload successful, updated item:', updatedItem);
+      console.log('✅ Update successful, updated item:', updatedItem);
       setItem(updatedItem);
+      setFormData(updatedItem); // Update formData so the image_url changes
       setImageKey(prev => prev + 1); // Force image reload
       setGridOpen(false);
       setSuccess("Main image updated successfully!");
@@ -354,16 +346,45 @@ export default function ItemPage() {
   const handlePhotoDelete = async (photoId: string) => {
     if (!id) return;
     
+    // Find the photo being deleted
+    const photoToDelete = photos.find(p => p.id === photoId);
+    const isMainImage = photoToDelete && formData.image_url === photoToDelete.url;
+    
     // Optimistic update - remove from UI immediately
     const prev = photos;
-    setPhotos(p => p.filter(x => x.id !== photoId));
+    const remainingPhotos = photos.filter(x => x.id !== photoId);
+    setPhotos(remainingPhotos);
     
     setLoadingMessage("Deleting photo...");
     
     try {
       const r = await fetch(`/api/items/${id}/photos/${photoId}`, { method: "DELETE" });
       if (r.ok) {
-        setSuccess("Photo deleted successfully!");
+        // If we deleted the main image, automatically set a new one
+        if (isMainImage && remainingPhotos.length > 0) {
+          // Choose replacement: if main was first photo, use next photo (index 0 after deletion)
+          // otherwise use first photo (index 0)
+          const replacementPhoto = remainingPhotos[0];
+          
+          // Set the new main image
+          const setMainResponse = await fetch(`/api/items/${id}/set-main-image`, { 
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ photoUrl: replacementPhoto.url })
+          });
+          
+          if (setMainResponse.ok) {
+            const updatedItem = await setMainResponse.json();
+            setItem(updatedItem);
+            setFormData(updatedItem);
+            setImageKey(prev => prev + 1);
+            setSuccess("Photo deleted and main image updated!");
+          } else {
+            setSuccess("Photo deleted successfully!");
+          }
+        } else {
+          setSuccess("Photo deleted successfully!");
+        }
         setTimeout(() => setSuccess(""), 3000);
       } else {
         // Revert on error
@@ -509,7 +530,12 @@ export default function ItemPage() {
                 
                 <div style={styles.imageBox}>
                   {formData.image_url ? (
-                    <img key={imageKey} src={formData.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
+                    <img 
+                      key={imageKey} 
+                      src={`${formData.image_url}?v=${imageKey}`} 
+                      alt="" 
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} 
+                    />
                   ) : photos.length > 0 ? (
                     <img src={photos[0].url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                   ) : (

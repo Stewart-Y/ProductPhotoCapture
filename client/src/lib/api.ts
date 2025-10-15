@@ -1,3 +1,6 @@
+// API base URL - use environment variable or default to relative path
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+
 export type Item = { 
   id: string;
   sku: string | null;
@@ -28,19 +31,19 @@ export type Item = {
 export type Photo = { id: string; item_id: string; url: string; thumb_url?: string; file_name: string; created_at: string };
 
 export async function fetchItems(): Promise<Item[]> {
-  const r = await fetch('/api/items');
+  const r = await fetch(`${API_BASE_URL}/api/items`);
   if (!r.ok) throw new Error('Failed to fetch items');
   return r.json();
 }
 
 export async function fetchItem(id: string): Promise<Item> {
-  const r = await fetch(`/api/items/${id}`);
+  const r = await fetch(`${API_BASE_URL}/api/items/${id}`);
   if (!r.ok) throw new Error('Failed to fetch item');
   return r.json();
 }
 
 export async function updateItem(id: string, data: Partial<Item>): Promise<Item> {
-  const r = await fetch(`/api/items/${id}`, {
+  const r = await fetch(`${API_BASE_URL}/api/items/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
@@ -53,7 +56,7 @@ export async function uploadItemImage(id: string, file: File): Promise<Item> {
   const formData = new FormData();
   formData.append('image', file);
   
-  const r = await fetch(`/api/items/${id}/upload-image`, {
+  const r = await fetch(`${API_BASE_URL}/api/items/${id}/upload-image`, {
     method: 'POST',
     body: formData
   });
@@ -62,7 +65,13 @@ export async function uploadItemImage(id: string, file: File): Promise<Item> {
 }
 
 export async function fetchPhotos(id: string): Promise<Photo[]> {
-  const r = await fetch(`/api/items/${id}/photos`);
+  const r = await fetch(`${API_BASE_URL}/api/items/${id}/photos`);
   if (!r.ok) throw new Error('Failed to fetch photos');
+  return r.json();
+}
+
+export async function syncFrom3JMS(): Promise<{ success: boolean; imported: number; updated: number; skipped: number; total: number }> {
+  const r = await fetch(`${API_BASE_URL}/api/tjms/import`, { method: 'POST' });
+  if (!r.ok) throw new Error('Sync failed');
   return r.json();
 }

@@ -140,7 +140,12 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                 transform: dragOverIndex === index && draggedIndex !== index ? "scale(0.95)" : "scale(1)",
                 transition: "transform 0.2s, opacity 0.2s"
               }}
-              onClick={() => onSetMainImage && setSelectedPhoto(photo)}
+              onClick={() => {
+                if (onSetMainImage) {
+                  // Toggle selection - if already selected, deselect it
+                  setSelectedPhoto(selectedPhoto?.id === photo.id ? null : photo);
+                }
+              }}
             >
               <img
                 src={photo.thumb_url || photo.url}
@@ -217,16 +222,19 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                   style={{
                     position: "absolute",
                     top: "8px",
-                    right: "8px",
+                    left: "8px",
                     backgroundColor: "#3b82f6",
                     color: "white",
                     borderRadius: "50%",
-                    width: "24px",
-                    height: "24px",
+                    width: "28px",
+                    height: "28px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "16px"
+                    fontSize: "16px",
+                    fontWeight: "600",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
+                    zIndex: 5
                   }}
                 >
                   ✓

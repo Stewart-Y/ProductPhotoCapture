@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchItems, type Item } from "../lib/api";
+import { fetchItems, syncFrom3JMS, type Item } from "../lib/api";
 import { Link } from "react-router-dom";
 import Header from "../components/Header";
 
@@ -98,16 +98,109 @@ const styles = {
   emptyText: {
     color: '#94a3b8',
     fontSize: '13px'
+  },
+  pagination: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '24px',
+    borderTop: '1px solid #e2e8f0',
+    backgroundColor: '#fafbfc'
+  },
+  pageButton: {
+    padding: '8px 12px',
+    border: '1px solid #cbd5e1',
+    borderRadius: '6px',
+    backgroundColor: 'white',
+    color: '#475569',
+    fontSize: '14px',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    fontWeight: '500' as const,
+    minWidth: '40px'
+  },
+  pageButtonActive: {
+    backgroundColor: '#3b82f6',
+    color: 'white',
+    borderColor: '#3b82f6',
+    fontWeight: '600' as const
+  },
+  pageButtonDisabled: {
+    opacity: 0.5,
+    cursor: 'not-allowed'
   }
 };
 
 export default function InventoryPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [err, setErr] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
 
   useEffect(() => {
     fetchItems().then(setItems).catch(e => setErr(String(e)));
   }, []);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(items.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentItems = items.slice(startIndex, endIndex);
+
+  // Generate page numbers to display
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxVisible = 7; // Show max 7 page buttons
+    
+    if (totalPages <= maxVisible) {
+      // Show all pages if total is small
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+      
+      if (currentPage > 3) {
+        pages.push('...');
+      }
+      
+      // Show pages around current page
+      for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+        pages.push(i);
+      }
+      
+      if (currentPage < totalPages - 2) {
+        pages.push('...');
+      }
+      
+      // Always show last page
+      pages.push(totalPages);
+    }
+    
+    return pages;
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult("");
+    setErr("");
+    try {
+      const result = await syncFrom3JMS();
+      setSyncResult(`Sync complete: ${result.imported} imported, ${result.updated} updated, ${result.skipped} skipped`);
+      // Refresh items list after sync
+      const refreshedItems = await fetchItems();
+      setItems(refreshedItems);
+      setCurrentPage(1); // Reset to first page after sync
+    } catch (e) {
+      setErr(`Sync failed: ${String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div style={styles.container}>
@@ -123,6 +216,15 @@ export default function InventoryPage() {
               onBlur={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
             />
             <button 
+              style={{...styles.addButton, backgroundColor: syncing ? '#94a3b8' : '#10b981'}}
+              onMouseEnter={(e) => !syncing && (e.currentTarget.style.backgroundColor = '#059669')}
+              onMouseLeave={(e) => !syncing && (e.currentTarget.style.backgroundColor = '#10b981')}
+              onClick={handleSync}
+              disabled={syncing}
+            >
+              {syncing ? '⏳ Syncing...' : '🔄 Sync from 3JMS'}
+            </button>
+            <button 
               style={styles.addButton}
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
@@ -132,6 +234,7 @@ export default function InventoryPage() {
           </div>
 
           {err && <div style={{ color: "#ef4444", padding: '20px', backgroundColor: '#fef2f2', borderLeft: '4px solid #ef4444' }}>{err}</div>}
+          {syncResult && <div style={{ color: "#10b981", padding: '20px', backgroundColor: '#f0fdf4', borderLeft: '4px solid #10b981' }}>{syncResult}</div>}
 
           <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
@@ -148,7 +251,7 @@ export default function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map(it => (
+                {currentItems.map(it => (
                   <tr 
                     key={it.id}
                     style={{ 
@@ -222,6 +325,72 @@ export default function InventoryPage() {
               fontSize: '14px'
             }}>
               No items found
+            </div>
+          )}
+
+          {/* Pagination */}
+          {items.length > 0 && totalPages > 1 && (
+            <div style={styles.pagination}>
+              <button
+                style={{
+                  ...styles.pageButton,
+                  ...(currentPage === 1 ? styles.pageButtonDisabled : {})
+                }}
+                onClick={() => setCurrentPage(currentPage - 1)}
+                disabled={currentPage === 1}
+                onMouseEnter={(e) => currentPage !== 1 && (e.currentTarget.style.borderColor = '#3b82f6')}
+                onMouseLeave={(e) => currentPage !== 1 && (e.currentTarget.style.borderColor = '#cbd5e1')}
+              >
+                ← Prev
+              </button>
+
+              {getPageNumbers().map((page, idx) => (
+                typeof page === 'number' ? (
+                  <button
+                    key={idx}
+                    style={{
+                      ...styles.pageButton,
+                      ...(currentPage === page ? styles.pageButtonActive : {})
+                    }}
+                    onClick={() => setCurrentPage(page)}
+                    onMouseEnter={(e) => {
+                      if (currentPage !== page) {
+                        e.currentTarget.style.borderColor = '#3b82f6';
+                        e.currentTarget.style.color = '#3b82f6';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (currentPage !== page) {
+                        e.currentTarget.style.borderColor = '#cbd5e1';
+                        e.currentTarget.style.color = '#475569';
+                      }
+                    }}
+                  >
+                    {page}
+                  </button>
+                ) : (
+                  <span key={idx} style={{ padding: '8px 4px', color: '#94a3b8' }}>
+                    {page}
+                  </span>
+                )
+              ))}
+
+              <button
+                style={{
+                  ...styles.pageButton,
+                  ...(currentPage === totalPages ? styles.pageButtonDisabled : {})
+                }}
+                onClick={() => setCurrentPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                onMouseEnter={(e) => currentPage !== totalPages && (e.currentTarget.style.borderColor = '#3b82f6')}
+                onMouseLeave={(e) => currentPage !== totalPages && (e.currentTarget.style.borderColor = '#cbd5e1')}
+              >
+                Next →
+              </button>
+
+              <span style={{ marginLeft: '16px', fontSize: '13px', color: '#64748b' }}>
+                Showing {startIndex + 1}-{Math.min(endIndex, items.length)} of {items.length} items
+              </span>
             </div>
           )}
         </div>

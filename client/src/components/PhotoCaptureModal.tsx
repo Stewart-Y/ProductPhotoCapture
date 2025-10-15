@@ -42,9 +42,25 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
     setErr("");
     stop();
     try {
+      // Request high resolution video (4K if available, fallback to 1080p)
       const constraints = deviceId 
-        ? { video: { deviceId: { ideal: deviceId } }, audio: false }
-        : { video: true, audio: false };
+        ? { 
+            video: { 
+              deviceId: { ideal: deviceId },
+              width: { ideal: 4096 },
+              height: { ideal: 2160 },
+              facingMode: "environment"
+            }, 
+            audio: false 
+          }
+        : { 
+            video: {
+              width: { ideal: 4096 },
+              height: { ideal: 2160 },
+              facingMode: "environment"
+            }, 
+            audio: false 
+          };
       
       console.log("Requesting camera with constraints:", constraints);
       const s = await navigator.mediaDevices.getUserMedia(constraints);
@@ -135,7 +151,8 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
       return;
     }
     ctx.drawImage(v, 0, 0, w, h);
-    setSnapshot(c.toDataURL("image/jpeg", 0.92));
+    // Use higher quality (0.95) for better image preservation
+    setSnapshot(c.toDataURL("image/jpeg", 0.95));
     stop(); // Stop the camera feed after capture
     setStep("confirm");
   };
