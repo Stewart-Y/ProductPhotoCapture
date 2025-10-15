@@ -103,7 +103,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
               justifyContent: "center"
             }}
           >
-            +�
+            ×
           </button>
         </div>
 
@@ -145,7 +145,6 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                   width: "100%",
                   aspectRatio: "1",
                   objectFit: "cover",
-                  borderRadius: "8px",
                   display: "block",
                   border: dragOverIndex === index && draggedIndex !== index
                     ? "3px dashed #3b82f6"
@@ -189,7 +188,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#dc2626"}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#ef4444"}
                 >
-                  +�
+                  ×
                 </button>
               )}
               
@@ -228,7 +227,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                     zIndex: 5
                   }}
                 >
-                  G��
+                  ✓
                 </div>
               )}
             </div>
