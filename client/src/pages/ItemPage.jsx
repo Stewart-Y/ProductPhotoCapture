@@ -148,8 +148,8 @@ export default function ItemPage() {
   const [camOpen, setCamOpen] = useState(false);
   const [gridOpen, setGridOpen] = useState(false);
   const [imageKey, setImageKey] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState<string>("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loadingMessage, setLoadingMessage] = useState("");
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (!id) return;
