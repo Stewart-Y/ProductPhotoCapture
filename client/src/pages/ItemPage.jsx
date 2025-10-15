@@ -278,12 +278,12 @@ export default function ItemPage() {
       
       if (!r.ok) {
         const errorData = await r.json().catch(() => ({ error: 'Update failed' }));
-        console.error('G�� Update failed:', errorData);
+        console.error('❌ Update failed:', errorData);
         throw new Error(errorData.error || `Failed to set main image (${r.status})`);
       }
       
       const updatedItem = await r.json();
-      console.log('G�� Update successful, updated item:', updatedItem);
+      console.log('✅ Update successful, updated item:', updatedItem);
       setItem(updatedItem);
       setFormData(updatedItem); // Update formData so the image_url changes
       setImageKey(prev => prev + 1); // Force image reload
@@ -435,7 +435,7 @@ export default function ItemPage() {
               cursor: saving ? 'not-allowed' : 'pointer'
             }}
           >
-            {saving ? 'GŦ Saving...' : '=��+ Save details'}
+            {saving ? '⏳ Saving...' : '💾 Save details'}
           </button>
         </div>
       </div>
@@ -443,7 +443,7 @@ export default function ItemPage() {
       {/* Header Section */}
       <div style={styles.headerSection}>
         <Link to="/" style={{ color: '#94a3b8', fontSize: '14px', textDecoration: 'none' }}>
-          G�� Back to Inventory
+          ← Back to Inventory
         </Link>
         <h1 style={{ fontSize: '24px', fontWeight: '700', marginTop: '12px', marginBottom: '4px' }}>
           ITEM DETAILS
@@ -464,7 +464,7 @@ export default function ItemPage() {
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
         }}>
           <div>
-            <strong style={{ fontWeight: '600' }}>G�� Error: </strong>
+            <strong style={{ fontWeight: '600' }}>❌ Error: </strong>
             {err}
           </div>
           <button
@@ -495,7 +495,7 @@ export default function ItemPage() {
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
         }}>
           <div>
-            <strong style={{ fontWeight: '600' }}>G�� Success: </strong>
+            <strong style={{ fontWeight: '600' }}>✅ Success: </strong>
             {success}
           </div>
           <button
@@ -591,7 +591,7 @@ export default function ItemPage() {
                       cursor: 'pointer'
                     }}
                   >
-                    =��+ {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
+                    📸 {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
                   </button>
                 </div>
 
