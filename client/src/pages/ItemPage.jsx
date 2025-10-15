@@ -138,7 +138,7 @@ const styles = {
 
 export default function ItemPage() {
   const { id } = useParams();
-  const [item, setItem] = useState<Item | null>(null);
+  const [item, setItem] = useState(null);
   const [formData, setFormData] = useState({});
   const [photos, setPhotos] = useState([]);
   const [err, setErr] = useState("");
