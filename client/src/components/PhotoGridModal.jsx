@@ -1,18 +1,9 @@
 import { useState } from "react";
-import type { Photo } from "../lib/api";
 
-interface PhotoGridModalProps {
-  photos: Photo[];
-  onClose: () => void;
-  onSetMainImage?: (photo: Photo) => void;
-  onDelete?: (photoId: string) => void;
-  onReorder?: (photoIds: string[]) => void;
-}
-
-export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDelete, onReorder }: PhotoGridModalProps) {
-  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDelete, onReorder }) {
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const handleSetMainImage = () => {
     if (selectedPhoto && onSetMainImage) {
@@ -21,12 +12,12 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
+  const handleDragStart = (e, index) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
+  const handleDragOver = (e, index) => {
     e.preventDefault();
     setDragOverIndex(index);
   };
@@ -35,7 +26,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     setDragOverIndex(null);
   };
 
-  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+  const handleDrop = (e, dropIndex) => {
     e.preventDefault();
     
     if (draggedIndex === null || draggedIndex === dropIndex || !onReorder) return;
@@ -112,7 +103,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
               justifyContent: "center"
             }}
           >
-            ×
+            +�
           </button>
         </div>
 
@@ -198,7 +189,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#dc2626"}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#ef4444"}
                 >
-                  ×
+                  +�
                 </button>
               )}
               
@@ -237,7 +228,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                     zIndex: 5
                   }}
                 >
-                  ✓
+                  G��
                 </div>
               )}
             </div>
@@ -282,3 +273,5 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     </div>
   );
 }
+
+

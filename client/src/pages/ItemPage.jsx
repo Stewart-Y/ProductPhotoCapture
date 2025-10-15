@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchItem, fetchPhotos, updateItem, type Item, type Photo } from "../lib/api";
+import { fetchItem, fetchPhotos, updateItem } from "../lib/api";
 import Header from "../components/Header";
 import PhotoCaptureModal from "../components/PhotoCaptureModal";
 import PhotoGallery from "../components/PhotoGallery";
@@ -54,14 +54,14 @@ const styles = {
   },
   formGroup: {
     display: 'flex',
-    flexDirection: 'column' as const,
+    flexDirection: 'column',
     gap: '8px'
   },
   label: {
     fontSize: '13px',
     fontWeight: '600',
     color: '#64748b',
-    textTransform: 'uppercase' as const,
+    textTransform: 'uppercase',
     letterSpacing: '0.5px'
   },
   input: {
@@ -87,7 +87,7 @@ const styles = {
     borderRadius: '6px',
     fontSize: '14px',
     outline: 'none',
-    resize: 'vertical' as const,
+    resize: 'vertical',
     minHeight: '80px',
     fontFamily: 'inherit'
   },
@@ -139,8 +139,8 @@ const styles = {
 export default function ItemPage() {
   const { id } = useParams();
   const [item, setItem] = useState<Item | null>(null);
-  const [formData, setFormData] = useState<Partial<Item>>({});
-  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [formData, setFormData] = useState({});
+  const [photos, setPhotos] = useState([]);
   const [err, setErr] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
@@ -160,11 +160,11 @@ export default function ItemPage() {
     fetchPhotos(id).then(setPhotos).catch(e => setErr(String(e)));
   }, [id]);
 
-  const handleChange = (field: keyof Item, value: string | number) => {
+  const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleCheckbox = (field: keyof Item, checked: boolean) => {
+  const handleCheckbox = (field, checked) => {
     setFormData(prev => ({ ...prev, [field]: checked ? 1 : 0 }));
   };
 
@@ -187,7 +187,7 @@ export default function ItemPage() {
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     
@@ -236,7 +236,7 @@ export default function ItemPage() {
     fileInputRef.current?.click();
   };
 
-  const handlePhotoSaved = async (photo: Photo) => {
+  const handlePhotoSaved = async (photo) => {
     // If we have 4 photos, delete the oldest one first
     if (photos.length >= 4 && id) {
       const oldestPhoto = photos[photos.length - 1];
@@ -259,7 +259,7 @@ export default function ItemPage() {
     setTimeout(() => setSuccess(""), 3000);
   };
 
-  const handleSetMainImage = async (photo: Photo) => {
+  const handleSetMainImage = async (photo) => {
     if (!id) return;
     
     setLoadingMessage("Setting as main image...");
@@ -274,16 +274,16 @@ export default function ItemPage() {
         body: JSON.stringify({ photoUrl: photo.url })
       });
       
-      console.log('📨 Response status:', r.status, r.statusText);
+      console.log('=��� Response status:', r.status, r.statusText);
       
       if (!r.ok) {
         const errorData = await r.json().catch(() => ({ error: 'Update failed' }));
-        console.error('❌ Update failed:', errorData);
+        console.error('G�� Update failed:', errorData);
         throw new Error(errorData.error || `Failed to set main image (${r.status})`);
       }
       
       const updatedItem = await r.json();
-      console.log('✅ Update successful, updated item:', updatedItem);
+      console.log('G�� Update successful, updated item:', updatedItem);
       setItem(updatedItem);
       setFormData(updatedItem); // Update formData so the image_url changes
       setImageKey(prev => prev + 1); // Force image reload
@@ -291,7 +291,7 @@ export default function ItemPage() {
       setSuccess("Main image updated successfully!");
       setTimeout(() => setSuccess(""), 3000);
     } catch (error) {
-      console.error('💥 Error in handleSetMainImage:', error);
+      console.error('=��� Error in handleSetMainImage:', error);
       const message = error instanceof Error ? error.message : 'Failed to set main image';
       setErr(message);
       setTimeout(() => setErr(""), 5000);
@@ -300,12 +300,12 @@ export default function ItemPage() {
     }
   };
 
-  const handlePhotoReorder = async (photoIds: string[]) => {
+  const handlePhotoReorder = async (photoIds) => {
     if (!id) return;
     
     // Optimistic update - reorder in UI immediately
     const reorderedPhotos = photoIds.map(photoId => 
-      photos.find(p => p.id === photoId)!
+      photos.find(p => p.id === photoId)
     ).filter(Boolean);
     setPhotos(reorderedPhotos);
     
@@ -343,7 +343,7 @@ export default function ItemPage() {
     }
   };
 
-  const handlePhotoDelete = async (photoId: string) => {
+  const handlePhotoDelete = async (photoId) => {
     if (!id) return;
     
     // Find the photo being deleted
@@ -419,10 +419,10 @@ export default function ItemPage() {
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
           <button style={{...styles.button, backgroundColor: '#6b7280', color: 'white'}}>
-            📊 Ecom Verified
+            =��� Ecom Verified
           </button>
           <button style={{...styles.button, backgroundColor: '#dc2626', color: 'white'}}>
-            🧊 Freeze Item
+            =��� Freeze Item
           </button>
           <button 
             onClick={handleSave}
@@ -435,7 +435,7 @@ export default function ItemPage() {
               cursor: saving ? 'not-allowed' : 'pointer'
             }}
           >
-            {saving ? '⏳ Saving...' : '💾 Save details'}
+            {saving ? 'GŦ Saving...' : '=��+ Save details'}
           </button>
         </div>
       </div>
@@ -443,7 +443,7 @@ export default function ItemPage() {
       {/* Header Section */}
       <div style={styles.headerSection}>
         <Link to="/" style={{ color: '#94a3b8', fontSize: '14px', textDecoration: 'none' }}>
-          ← Back to Inventory
+          G�� Back to Inventory
         </Link>
         <h1 style={{ fontSize: '24px', fontWeight: '700', marginTop: '12px', marginBottom: '4px' }}>
           ITEM DETAILS
@@ -464,7 +464,7 @@ export default function ItemPage() {
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
         }}>
           <div>
-            <strong style={{ fontWeight: '600' }}>❌ Error: </strong>
+            <strong style={{ fontWeight: '600' }}>G�� Error: </strong>
             {err}
           </div>
           <button
@@ -478,7 +478,7 @@ export default function ItemPage() {
               padding: '0 8px',
               lineHeight: '1'
             }}
-          >×</button>
+          >+�</button>
         </div>
       )}
       {success && (
@@ -495,7 +495,7 @@ export default function ItemPage() {
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
         }}>
           <div>
-            <strong style={{ fontWeight: '600' }}>✅ Success: </strong>
+            <strong style={{ fontWeight: '600' }}>G�� Success: </strong>
             {success}
           </div>
           <button
@@ -509,7 +509,7 @@ export default function ItemPage() {
               padding: '0 8px',
               lineHeight: '1'
             }}
-          >×</button>
+          >+�</button>
         </div>
       )}
 
@@ -521,7 +521,7 @@ export default function ItemPage() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <span style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b' }}>
-                    {item?.sku || 'VWS200433868'} 📋
+                    {item?.sku || 'VWS200433868'} =���
                   </span>
                 </div>
                 <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
@@ -591,7 +591,7 @@ export default function ItemPage() {
                       cursor: 'pointer'
                     }}
                   >
-                    📷 {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
+                    =��+ {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
                   </button>
                 </div>
 
@@ -622,7 +622,7 @@ export default function ItemPage() {
                         cursor: 'pointer'
                       }}
                     >
-                      📋 Open Gallery
+                      =��� Open Gallery
                     </button>
                   </div>
                 )}
@@ -840,7 +840,7 @@ export default function ItemPage() {
                     fontSize: '12px',
                     cursor: 'pointer'
                   }}>
-                    ↻
+                    G�+
                   </button>
                 </div>
 
@@ -930,3 +930,6 @@ export default function ItemPage() {
     </div>
   );
 }
+
+
+

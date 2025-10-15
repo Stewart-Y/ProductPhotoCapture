@@ -1,6 +1,6 @@
 import Spinner from "./Spinner";
 
-export default function LoadingOverlay({ message = "Loading..." }: { message?: string }) {
+export default function LoadingOverlay({ message = "Loading..." }) {
   return (
     <div
       style={{

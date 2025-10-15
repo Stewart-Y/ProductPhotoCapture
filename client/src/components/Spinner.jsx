@@ -1,4 +1,4 @@
-export default function Spinner({ size = 24, color = "#3b82f6" }: { size?: number; color?: string }) {
+export default function Spinner({ size = 24, color = "#3b82f6" }) {
   return (
     <div
       style={{
