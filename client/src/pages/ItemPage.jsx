@@ -274,7 +274,7 @@ export default function ItemPage() {
         body: JSON.stringify({ photoUrl: photo.url })
       });
       
-      console.log('=��� Response status:', r.status, r.statusText);
+      console.log('📨 Response status:', r.status, r.statusText);
       
       if (!r.ok) {
         const errorData = await r.json().catch(() => ({ error: 'Update failed' }));
@@ -291,7 +291,7 @@ export default function ItemPage() {
       setSuccess("Main image updated successfully!");
       setTimeout(() => setSuccess(""), 3000);
     } catch (error) {
-      console.error('=��� Error in handleSetMainImage:', error);
+      console.error('💥 Error in handleSetMainImage:', error);
       const message = error instanceof Error ? error.message : 'Failed to set main image';
       setErr(message);
       setTimeout(() => setErr(""), 5000);
@@ -419,10 +419,10 @@ export default function ItemPage() {
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
           <button style={{...styles.button, backgroundColor: '#6b7280', color: 'white'}}>
-            =��� Ecom Verified
+            ✓ Ecom Verified
           </button>
           <button style={{...styles.button, backgroundColor: '#dc2626', color: 'white'}}>
-            =��� Freeze Item
+            ❄️ Freeze Item
           </button>
           <button 
             onClick={handleSave}
@@ -521,7 +521,7 @@ export default function ItemPage() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <span style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b' }}>
-                    {item?.sku || 'VWS200433868'} =���
+                    {item?.sku || 'VWS200433868'}
                   </span>
                 </div>
                 <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
@@ -622,7 +622,7 @@ export default function ItemPage() {
                         cursor: 'pointer'
                       }}
                     >
-                      =��� Open Gallery
+                      🖼️ Open Gallery
                     </button>
                   </div>
                 )}
