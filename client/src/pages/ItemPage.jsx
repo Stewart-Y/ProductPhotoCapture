@@ -534,10 +534,10 @@ export default function ItemPage() {
                       key={imageKey} 
                       src={`${formData.image_url}?v=${imageKey}`} 
                       alt="" 
-                      style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} 
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '8px' }} 
                     />
                   ) : photos.length > 0 ? (
-                    <img src={photos[0].url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
+                    <img src={photos[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                   ) : (
                     <div style={{ textAlign: 'center', color: '#94a3b8' }}>
                       <div style={{ fontSize: '48px', marginBottom: '8px' }}>📷</div>
