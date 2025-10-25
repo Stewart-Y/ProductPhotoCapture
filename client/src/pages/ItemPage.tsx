@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchItem, fetchPhotos, updateItem } from "../lib/api";
+import { fetchItem, fetchPhotos, updateItem, type Item, type Photo } from "../lib/api";
 import Header from "../components/Header";
 import PhotoCaptureModal from "../components/PhotoCaptureModal";
 import PhotoGallery from "../components/PhotoGallery";
@@ -54,14 +54,14 @@ const styles = {
   },
   formGroup: {
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'column' as const,
     gap: '8px'
   },
   label: {
     fontSize: '13px',
     fontWeight: '600',
     color: '#64748b',
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.5px'
   },
   input: {
@@ -87,7 +87,7 @@ const styles = {
     borderRadius: '6px',
     fontSize: '14px',
     outline: 'none',
-    resize: 'vertical',
+    resize: 'vertical' as const,
     minHeight: '80px',
     fontFamily: 'inherit'
   },
@@ -138,9 +138,9 @@ const styles = {
 
 export default function ItemPage() {
   const { id } = useParams();
-  const [item, setItem] = useState(null);
-  const [formData, setFormData] = useState({});
-  const [photos, setPhotos] = useState([]);
+  const [item, setItem] = useState<Item | null>(null);
+  const [formData, setFormData] = useState<Partial<Item>>({});
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [err, setErr] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
@@ -148,8 +148,8 @@ export default function ItemPage() {
   const [camOpen, setCamOpen] = useState(false);
   const [gridOpen, setGridOpen] = useState(false);
   const [imageKey, setImageKey] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState("");
-  const fileInputRef = useRef(null);
+  const [loadingMessage, setLoadingMessage] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -160,11 +160,11 @@ export default function ItemPage() {
     fetchPhotos(id).then(setPhotos).catch(e => setErr(String(e)));
   }, [id]);
 
-  const handleChange = (field, value) => {
+  const handleChange = (field: keyof Item, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleCheckbox = (field, checked) => {
+  const handleCheckbox = (field: keyof Item, checked: boolean) => {
     setFormData(prev => ({ ...prev, [field]: checked ? 1 : 0 }));
   };
 
@@ -187,7 +187,7 @@ export default function ItemPage() {
     }
   };
 
-  const handleFileChange = async (e) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     
@@ -236,7 +236,7 @@ export default function ItemPage() {
     fileInputRef.current?.click();
   };
 
-  const handlePhotoSaved = async (photo) => {
+  const handlePhotoSaved = async (photo: Photo) => {
     // If we have 4 photos, delete the oldest one first
     if (photos.length >= 4 && id) {
       const oldestPhoto = photos[photos.length - 1];
@@ -259,7 +259,7 @@ export default function ItemPage() {
     setTimeout(() => setSuccess(""), 3000);
   };
 
-  const handleSetMainImage = async (photo) => {
+  const handleSetMainImage = async (photo: Photo) => {
     if (!id) return;
     
     setLoadingMessage("Setting as main image...");
@@ -300,12 +300,12 @@ export default function ItemPage() {
     }
   };
 
-  const handlePhotoReorder = async (photoIds) => {
+  const handlePhotoReorder = async (photoIds: string[]) => {
     if (!id) return;
     
     // Optimistic update - reorder in UI immediately
     const reorderedPhotos = photoIds.map(photoId => 
-      photos.find(p => p.id === photoId)
+      photos.find(p => p.id === photoId)!
     ).filter(Boolean);
     setPhotos(reorderedPhotos);
     
@@ -343,7 +343,7 @@ export default function ItemPage() {
     }
   };
 
-  const handlePhotoDelete = async (photoId) => {
+  const handlePhotoDelete = async (photoId: string) => {
     if (!id) return;
     
     // Find the photo being deleted
@@ -419,10 +419,10 @@ export default function ItemPage() {
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '12px' }}>
           <button style={{...styles.button, backgroundColor: '#6b7280', color: 'white'}}>
-            ✓ Ecom Verified
+            📊 Ecom Verified
           </button>
           <button style={{...styles.button, backgroundColor: '#dc2626', color: 'white'}}>
-            ❄️ Freeze Item
+            🧊 Freeze Item
           </button>
           <button 
             onClick={handleSave}
@@ -478,7 +478,7 @@ export default function ItemPage() {
               padding: '0 8px',
               lineHeight: '1'
             }}
-          >+�</button>
+          >×</button>
         </div>
       )}
       {success && (
@@ -509,7 +509,7 @@ export default function ItemPage() {
               padding: '0 8px',
               lineHeight: '1'
             }}
-          >+�</button>
+          >×</button>
         </div>
       )}
 
@@ -521,7 +521,7 @@ export default function ItemPage() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <span style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b' }}>
-                    {item?.sku || 'VWS200433868'}
+                    {item?.sku || 'VWS200433868'} 📋
                   </span>
                 </div>
                 <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
@@ -534,10 +534,10 @@ export default function ItemPage() {
                       key={imageKey} 
                       src={`${formData.image_url}?v=${imageKey}`} 
                       alt="" 
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} 
                     />
                   ) : photos.length > 0 ? (
-                    <img src={photos[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                    <img src={photos[0].url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
                   ) : (
                     <div style={{ textAlign: 'center', color: '#94a3b8' }}>
                       <div style={{ fontSize: '48px', marginBottom: '8px' }}>📷</div>
@@ -591,7 +591,7 @@ export default function ItemPage() {
                       cursor: 'pointer'
                     }}
                   >
-                    📸 {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
+                    📷 {photos.length >= 4 ? 'Replace Photo' : 'Take Photo'}
                   </button>
                 </div>
 
@@ -622,7 +622,7 @@ export default function ItemPage() {
                         cursor: 'pointer'
                       }}
                     >
-                      🖼️ Open Gallery
+                      📋 Open Gallery
                     </button>
                   </div>
                 )}
@@ -840,7 +840,7 @@ export default function ItemPage() {
                     fontSize: '12px',
                     cursor: 'pointer'
                   }}>
-                    G�+
+                    ↻
                   </button>
                 </div>
 
@@ -930,6 +930,3 @@ export default function ItemPage() {
     </div>
   );
 }
-
-
-

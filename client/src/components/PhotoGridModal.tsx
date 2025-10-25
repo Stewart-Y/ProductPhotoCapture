@@ -1,9 +1,18 @@
 import { useState } from "react";
+import type { Photo } from "../lib/api";
 
-export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDelete, onReorder }) {
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
-  const [draggedIndex, setDraggedIndex] = useState(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
+interface PhotoGridModalProps {
+  photos: Photo[];
+  onClose: () => void;
+  onSetMainImage?: (photo: Photo) => void;
+  onDelete?: (photoId: string) => void;
+  onReorder?: (photoIds: string[]) => void;
+}
+
+export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDelete, onReorder }: PhotoGridModalProps) {
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const handleSetMainImage = () => {
     if (selectedPhoto && onSetMainImage) {
@@ -12,12 +21,12 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     }
   };
 
-  const handleDragStart = (e, index) => {
+  const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e, index) => {
+  const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
     setDragOverIndex(index);
   };
@@ -26,7 +35,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     setDragOverIndex(null);
   };
 
-  const handleDrop = (e, dropIndex) => {
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
     e.preventDefault();
     
     if (draggedIndex === null || draggedIndex === dropIndex || !onReorder) return;
@@ -145,6 +154,7 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
                   width: "100%",
                   aspectRatio: "1",
                   objectFit: "cover",
+                  borderRadius: "8px",
                   display: "block",
                   border: dragOverIndex === index && draggedIndex !== index
                     ? "3px dashed #3b82f6"
@@ -272,5 +282,3 @@ export default function PhotoGridModal({ photos, onClose, onSetMainImage, onDele
     </div>
   );
 }
-
-

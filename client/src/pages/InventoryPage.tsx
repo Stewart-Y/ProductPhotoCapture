@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchItems, syncFrom3JMS } from "../lib/api";
+import { fetchItems, syncFrom3JMS, type Item } from "../lib/api";
 import { Link } from "react-router-dom";
 import Header from "../components/Header";
 
@@ -48,20 +48,20 @@ const styles = {
     cursor: 'pointer',
     fontWeight: '600',
     transition: 'background-color 0.2s',
-    whiteSpace: 'nowrap'
+    whiteSpace: 'nowrap' as const
   },
   table: {
     width: '100%',
-    borderCollapse: 'collapse',
+    borderCollapse: 'collapse' as const,
     fontSize: '14px'
   },
   th: {
     padding: '16px 20px',
-    textAlign: 'left',
-    fontWeight: '700',
+    textAlign: 'left' as const,
+    fontWeight: '700' as const,
     color: '#475569',
     fontSize: '11px',
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.8px',
     backgroundColor: '#f8fafc',
     borderBottom: '2px solid #e2e8f0'
@@ -80,19 +80,19 @@ const styles = {
     justifyContent: 'center',
     fontSize: '9px',
     color: '#94a3b8',
-    fontWeight: '500',
+    fontWeight: '500' as const,
     border: '1px solid #e2e8f0',
     overflow: 'hidden'
   },
   link: {
     color: '#3b82f6',
     textDecoration: 'none',
-    fontWeight: '600',
+    fontWeight: '600' as const,
     fontSize: '13px'
   },
   itemName: {
     color: '#1e293b',
-    fontWeight: '500',
+    fontWeight: '500' as const,
     fontSize: '14px'
   },
   emptyText: {
@@ -117,14 +117,14 @@ const styles = {
     fontSize: '14px',
     cursor: 'pointer',
     transition: 'all 0.2s',
-    fontWeight: '500',
+    fontWeight: '500' as const,
     minWidth: '40px'
   },
   pageButtonActive: {
     backgroundColor: '#3b82f6',
     color: 'white',
     borderColor: '#3b82f6',
-    fontWeight: '600'
+    fontWeight: '600' as const
   },
   pageButtonDisabled: {
     opacity: 0.5,
@@ -133,7 +133,7 @@ const styles = {
 };
 
 export default function InventoryPage() {
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [err, setErr] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState("");
@@ -152,7 +152,7 @@ export default function InventoryPage() {
 
   // Generate page numbers to display
   const getPageNumbers = () => {
-    const pages = [];
+    const pages: (number | string)[] = [];
     const maxVisible = 7; // Show max 7 page buttons
     
     if (totalPages <= maxVisible) {
@@ -398,5 +398,3 @@ export default function InventoryPage() {
     </div>
   );
 }
-
-

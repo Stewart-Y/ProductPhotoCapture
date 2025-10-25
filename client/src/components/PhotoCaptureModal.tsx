@@ -1,18 +1,27 @@
 import React, { useEffect, useRef, useState } from "react";
 import Spinner from "./Spinner";
 
-export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
-  const [cams, setCams] = useState([]);
-  const [selected, setSelected] = useState("");
-  const [step, setStep] = useState("pick");
-  const [err, setErr] = useState("");
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  itemId: string;
+  onSaved: (photo: any) => void; // will receive created photo
+};
+
+type Cam = { deviceId: string; label: string };
+
+export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Props) {
+  const [cams, setCams] = useState<Cam[]>([]);
+  const [selected, setSelected] = useState<string>("");
+  const [step, setStep] = useState<"pick" | "preview" | "confirm">("pick");
+  const [err, setErr] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const [snapshot, setSnapshot] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [snapshot, setSnapshot] = useState<string>("");
 
   const stop = () => {
     if (streamRef.current) {
@@ -29,7 +38,7 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
     if (vids.length && !selected) setSelected(vids[0].deviceId);
   };
 
-  const start = async (deviceId) => {
+  const start = async (deviceId: string) => {
     setErr("");
     stop();
     try {
@@ -75,7 +84,7 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
           console.log("Immediate play failed, waiting for metadata:", playErr);
           
           // Wait for metadata if immediate play fails
-          await new Promise((resolve) => {
+          await new Promise<void>((resolve) => {
             if (!videoRef.current) {
               resolve();
               return;
@@ -105,7 +114,7 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
         console.error("videoRef.current is null!");
         setErr("Video element not found");
       }
-    } catch (e) { 
+    } catch (e: any) { 
       console.error("Camera start error:", e);
       let message = "Could not start camera";
       
@@ -180,7 +189,7 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
         await new Promise(resolve => setTimeout(resolve, 50));
         await start(selected);
       }
-    } catch (e) {
+    } catch (e: any) {
       const message = e?.message ?? "Failed to save photo";
       setErr(message);
     } finally {
@@ -341,12 +350,12 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }) {
   );
 }
 
-const overlay = {
+const overlay: React.CSSProperties = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
   display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 1000
 };
-const card = { background: "#fff", borderRadius: 10, padding: 20, width: 520, maxWidth: "100%" };
-const header = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 };
-const closeBtn = { background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: 4 };
-const btn = { padding: "8px 16px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };
-const btnSecondary = { padding: "8px 16px", backgroundColor: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };
+const card: React.CSSProperties = { background: "#fff", borderRadius: 10, padding: 20, width: 520, maxWidth: "100%" };
+const header: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 };
+const closeBtn: React.CSSProperties = { background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: 4 };
+const btn: React.CSSProperties = { padding: "8px 16px", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };
+const btnSecondary: React.CSSProperties = { padding: "8px 16px", backgroundColor: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };

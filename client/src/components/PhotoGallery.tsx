@@ -1,8 +1,12 @@
 import { useState } from "react";
+import type { Photo } from "../lib/api";
 
 export default function PhotoGallery({ 
   photos, 
   onDelete
+}: { 
+  photos: Photo[]; 
+  onDelete?: (id: string) => void;
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   
