@@ -8,11 +8,17 @@ import multer from 'multer';
 import { nanoid } from 'nanoid';
 import db from './db.js';
 import tjmsClient from './tjms-client.js';
+import jobRoutes from './jobs/routes.js';
+import { captureRawBody } from './jobs/webhook-verify.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
+
+// Capture raw body for webhook verification (BEFORE express.json())
+app.use(captureRawBody);
+
 app.use(express.json());
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +46,9 @@ const upload = multer({
 
 // Health
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Job Queue Routes (Phase 1 - AI Background Generation Pipeline)
+app.use('/api', jobRoutes);
 
 // Inventory routes (Phase 1)
 app.get('/api/items', (_req, res) => {
