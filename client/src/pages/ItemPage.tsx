@@ -601,8 +601,8 @@ export default function ItemPage() {
                     <div style={{ fontSize: '14px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>
                       Photo Gallery ({photos.length}/4)
                     </div>
-                    <PhotoGallery 
-                      photos={photos} 
+                    <PhotoGallery
+                      photos={photos}
                       onDelete={handlePhotoDelete}
                     />
                     
@@ -924,7 +924,7 @@ export default function ItemPage() {
           onReorder={handlePhotoReorder}
         />
       )}
-      
+
       {/* Loading Overlay */}
       {loadingMessage && <LoadingOverlay message={loadingMessage} />}
     </div>

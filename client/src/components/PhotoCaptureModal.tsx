@@ -17,6 +17,7 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
   const [err, setErr] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [autoEnhance, setAutoEnhance] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -172,7 +173,13 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
       
       const form = new FormData();
       form.append("file", blob, `capture-${Date.now()}.jpg`);
-      const r = await fetch(`/api/items/${encodeURIComponent(itemId)}/photos`, { method: "POST", body: form });
+      
+      // Use enhancement endpoint if auto-enhance is enabled
+      const endpoint = autoEnhance 
+        ? `/api/items/${encodeURIComponent(itemId)}/upload-image-enhanced?enhance=true`
+        : `/api/items/${encodeURIComponent(itemId)}/photos`;
+      
+      const r = await fetch(endpoint, { method: "POST", body: form });
       
       if (!r.ok) {
         const errorData = await r.json().catch(() => ({ error: 'Upload failed' }));
@@ -315,6 +322,42 @@ export default function PhotoCaptureModal({ open, onClose, itemId, onSaved }: Pr
         {step === "confirm" && (
           <div>
             <img src={snapshot} alt="preview" style={{ width: "100%", maxHeight: "400px", objectFit: "contain", borderRadius: 8 }} />
+            
+            {/* Auto-enhance checkbox */}
+            <div style={{ 
+              marginTop: 12, 
+              marginBottom: 12,
+              padding: '12px',
+              backgroundColor: '#f0f9ff',
+              borderRadius: '6px',
+              border: '1px solid #bfdbfe'
+            }}>
+              <label style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px', 
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}>
+                <input 
+                  type="checkbox" 
+                  checked={autoEnhance} 
+                  onChange={(e) => setAutoEnhance(e.target.checked)}
+                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                />
+                <span>✨ Auto-enhance to 4K quality (takes 5-10 seconds longer)</span>
+              </label>
+              <div style={{ 
+                marginTop: '6px', 
+                marginLeft: '24px', 
+                fontSize: '12px', 
+                color: '#64748b' 
+              }}>
+                Uses AI to upscale and enhance photo quality
+              </div>
+            </div>
+
             <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
               <button onClick={async () => { 
                 setSnapshot("");

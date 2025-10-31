@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { Photo } from "../lib/api";
 
-export default function PhotoGallery({ 
-  photos, 
+export default function PhotoGallery({
+  photos,
   onDelete
-}: { 
-  photos: Photo[]; 
+}: {
+  photos: Photo[];
   onDelete?: (id: string) => void;
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -71,7 +71,7 @@ export default function PhotoGallery({
             }}
           >✕</button>
         )}
-        
+
         {hasPrev && (
           <button
             onClick={goToPrev}

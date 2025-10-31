@@ -20,11 +20,15 @@ const __dirname = path.dirname(__filename);
 
 const uploadDir = path.join(__dirname, 'uploads');
 const thumbDir = path.join(__dirname, 'uploads', 'thumbnails');
+const tempDir = path.join(__dirname, 'uploads', 'tmp');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 if (!fs.existsSync(thumbDir)) {
   fs.mkdirSync(thumbDir, { recursive: true });
+}
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
 }
 
 app.use('/uploads', express.static(uploadDir));

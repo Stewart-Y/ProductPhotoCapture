@@ -65,11 +65,11 @@ try {
 try {
   const photosColumns = db.prepare('PRAGMA table_info(photos)').all();
   const photosColumnNames = photosColumns.map(col => col.name);
-  
+
   if (!photosColumnNames.includes('position')) {
     db.exec('ALTER TABLE photos ADD COLUMN position INTEGER DEFAULT 0');
     console.log('Added position column to photos table');
-    
+
     // Set initial positions based on created_at for existing photos
     const items = db.prepare('SELECT DISTINCT item_id FROM photos').all();
     items.forEach(({ item_id }) => {
@@ -82,6 +82,96 @@ try {
   }
 } catch (err) {
   console.error('Photos migration error:', err);
+}
+
+// =============================================================================
+// MIGRATION SYSTEM: Run numbered migration files
+// =============================================================================
+function runMigrations() {
+  const migrationsDir = path.join(__dirname, 'migrations');
+
+  // Create migrations directory if it doesn't exist
+  if (!fs.existsSync(migrationsDir)) {
+    fs.mkdirSync(migrationsDir, { recursive: true });
+    console.log('[Migrations] Created migrations directory');
+  }
+
+  // Get all .sql migration files
+  const migrationFiles = fs.readdirSync(migrationsDir)
+    .filter(f => f.endsWith('.sql'))
+    .sort(); // Natural sort ensures 001, 002, 003, etc.
+
+  if (migrationFiles.length === 0) {
+    console.log('[Migrations] No migration files found');
+    return;
+  }
+
+  // Create metadata table if it doesn't exist (stores migration state)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Get current migration version
+  const currentVersionRow = db.prepare("SELECT value FROM metadata WHERE key = 'migration_version'").get();
+  const currentVersion = currentVersionRow ? parseInt(currentVersionRow.value, 10) : 0;
+
+  console.log(`[Migrations] Current version: ${currentVersion}`);
+
+  // Run each migration file that hasn't been applied yet
+  migrationFiles.forEach(file => {
+    // Extract migration number from filename (e.g., "002-jobs-and-shopify.sql" -> 2)
+    const match = file.match(/^(\d+)-/);
+    if (!match) {
+      console.warn(`[Migrations] Skipping file with invalid name: ${file}`);
+      return;
+    }
+
+    const migrationNumber = parseInt(match[1], 10);
+
+    if (migrationNumber <= currentVersion) {
+      console.log(`[Migrations] Skipping already applied: ${file}`);
+      return;
+    }
+
+    console.log(`[Migrations] Running migration: ${file}`);
+
+    try {
+      const migrationPath = path.join(migrationsDir, file);
+      const migrationSQL = fs.readFileSync(migrationPath, 'utf-8');
+
+      // Run migration in a transaction
+      db.exec('BEGIN TRANSACTION');
+      db.exec(migrationSQL);
+
+      // Update migration version
+      db.prepare(`
+        INSERT OR REPLACE INTO metadata (key, value, updated_at)
+        VALUES ('migration_version', ?, CURRENT_TIMESTAMP)
+      `).run(migrationNumber.toString());
+
+      db.exec('COMMIT');
+
+      console.log(`[Migrations] ✅ Successfully applied: ${file}`);
+    } catch (error) {
+      db.exec('ROLLBACK');
+      console.error(`[Migrations] ❌ Failed to apply ${file}:`, error.message);
+      throw error; // Stop on first migration failure
+    }
+  });
+
+  console.log('[Migrations] All migrations complete');
+}
+
+// Run migrations on startup
+try {
+  runMigrations();
+} catch (err) {
+  console.error('[Migrations] Critical error during migration:', err);
+  process.exit(1);
 }
 
 // Seed demo items if empty
