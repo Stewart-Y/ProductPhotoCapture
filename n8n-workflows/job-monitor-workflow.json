@@ -1,0 +1,226 @@
+{
+  "name": "Job Status Monitor & Notifier",
+  "description": "Monitors job status and sends notifications on completion or failure",
+  "tags": [
+    "schedule",
+    "monitoring",
+    "notifications"
+  ],
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": "everyHour",
+        "hour": 0,
+        "minute": 0
+      },
+      "id": "schedule001",
+      "name": "Hourly Schedule",
+      "type": "n8n-nodes-base.schedule",
+      "typeVersion": 1.1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs/stats",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "http001",
+      "name": "Get Job Statistics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "rules": [
+            {
+              "value1": "={{ $json.today.done }}",
+              "operation": "gt",
+              "value2": "0"
+            }
+          ]
+        }
+      },
+      "id": "if001",
+      "name": "Check for Completed Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        750,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "rules": [
+            {
+              "value1": "={{ $json.today.failed }}",
+              "operation": "gt",
+              "value2": "0"
+            }
+          ]
+        }
+      },
+      "id": "if002",
+      "name": "Check for Failed Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        750,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs?status=DONE&limit=5",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "http002",
+      "name": "Get Completed Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs?status=FAILED&limit=5",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "http003",
+      "name": "Get Failed Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1000,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "jsonToCode",
+        "jsonData": "{\n  \"message\": \"✅ Jobs Completed Today\",\n  \"count\": \"={{ $json.count }}\",\n  \"jobs\": \"={{ $json.jobs?.map(j => `${j.sku} - $${j.cost_usd}`) }}\"\n}"
+      },
+      "id": "code001",
+      "name": "Format Completion Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "jsonToCode",
+        "jsonData": "{\n  \"message\": \"⚠️ Failed Jobs Alert\",\n  \"count\": \"={{ $json.count }}\",\n  \"jobs\": \"={{ $json.jobs?.map(j => `${j.sku} - ${j.error_code}`) }}\"\n}"
+      },
+      "id": "code002",
+      "name": "Format Failure Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        450
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get Job Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job Statistics": {
+      "main": [
+        [
+          {
+            "node": "Check for Completed Jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check for Failed Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Completed Jobs": {
+      "main": [
+        [
+          {
+            "node": "Get Completed Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Check for Failed Jobs": {
+      "main": [
+        [
+          {
+            "node": "Get Failed Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Completed Jobs": {
+      "main": [
+        [
+          {
+            "node": "Format Completion Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Failed Jobs": {
+      "main": [
+        [
+          {
+            "node": "Format Failure Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "activate": false
+}

@@ -1,0 +1,109 @@
+{
+  "name": "3JMS Image to Job Trigger",
+  "description": "Receives images from 3JMS webhook and creates jobs in the pipeline",
+  "tags": [
+    "webhook",
+    "3jms",
+    "job-creation"
+  ],
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "3jms-image-webhook",
+        "responseMode": "onReceived",
+        "httpMethod": "POST"
+      },
+      "id": "abc123def456",
+      "name": "3JMS Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "webhook_3jms_images"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:4000/api/webhooks/3jms/images",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "sku",
+              "value": "={{ $json.body.sku }}"
+            },
+            {
+              "name": "sha256",
+              "value": "={{ $json.body.sha256 }}"
+            },
+            {
+              "name": "imageUrl",
+              "value": "={{ $json.body.imageUrl }}"
+            },
+            {
+              "name": "theme",
+              "value": "={{ $json.body.theme || 'default' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "xyz789uvw012",
+      "name": "Create Job in Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "jsonToCode",
+        "jsonData": "{\n  \"status\": \"success\",\n  \"message\": \"Job created successfully\",\n  \"jobId\": \"={{ $json.jobId }}\",\n  \"sku\": \"={{ $json.job?.sku }}\"\n}"
+      },
+      "id": "pqr345stu678",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "3JMS Webhook Receiver": {
+      "main": [
+        [
+          {
+            "node": "Create Job in Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Job in Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "activate": false
+}
