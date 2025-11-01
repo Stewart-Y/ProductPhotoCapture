@@ -1,0 +1,199 @@
+{
+  "name": "Job Status Monitor",
+  "description": "Polls job status and sends notifications when jobs complete or fail",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerType": "everyHour"
+      },
+      "id": "schedule-trigger",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.schedule",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs/stats",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "get-stats",
+      "name": "Get Job Statistics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "rules": [
+            {
+              "value1": "={{ $json.today.failed }}",
+              "operation": "gt",
+              "value2": "0"
+            }
+          ]
+        }
+      },
+      "id": "check-failures",
+      "name": "Check for Failures",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs?status=FAILED&limit=5",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "get-failed-jobs",
+      "name": "Get Failed Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1000, 200]
+    },
+    {
+      "parameters": {
+        "nodeVersion": 1.1,
+        "resource": "message",
+        "channel": "#pipeline-alerts",
+        "text": "⚠️ **Pipeline Alert**\n\nFailed Jobs: {{ $json.count }}\n\n{{ $json.jobs.map(job => `- **${job.sku}**: ${job.error_code}`).join('\\n') }}"
+      },
+      "id": "send-slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 200],
+      "credentials": {
+        "slackApi": "slack_credential"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "rules": [
+            {
+              "value1": "={{ $json.today.done }}",
+              "operation": "gt",
+              "value2": "0"
+            }
+          ]
+        }
+      },
+      "id": "check-completions",
+      "name": "Check for Completions",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 450]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:4000/api/jobs?status=DONE&limit=5",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "get-completed-jobs",
+      "name": "Get Completed Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1000, 450]
+    },
+    {
+      "parameters": {
+        "nodeVersion": 1.1,
+        "resource": "message",
+        "channel": "#pipeline-status",
+        "text": "✅ **Jobs Completed**\n\nCompleted Today: {{ $json.count }}\n\n{{ $json.jobs.map(job => `- **${job.sku}**: {{ $json.cost_usd }} USD`).join('\\n') }}"
+      },
+      "id": "send-completion-alert",
+      "name": "Send Completion Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1250, 450],
+      "credentials": {
+        "slackApi": "slack_credential"
+      }
+    }
+  ],
+  "connections": {
+    "schedule-trigger": {
+      "main": [
+        [
+          {
+            "node": "get-stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get-stats": {
+      "main": [
+        [
+          {
+            "node": "check-failures",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "check-completions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check-failures": {
+      "main": [
+        [
+          {
+            "node": "get-failed-jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "get-failed-jobs": {
+      "main": [
+        [
+          {
+            "node": "send-slack-alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check-completions": {
+      "main": [
+        [
+          {
+            "node": "get-completed-jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "get-completed-jobs": {
+      "main": [
+        [
+          {
+            "node": "send-completion-alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false
+}

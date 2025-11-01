@@ -1,0 +1,102 @@
+{
+  "name": "3JMS Image to Job Trigger",
+  "description": "Receives images from 3JMS and creates jobs in the pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "3jms-image-webhook",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "3JMS Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:4000/api/webhooks/3jms/images",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "sku",
+              "value": "={{ $json.sku }}"
+            },
+            {
+              "name": "sha256",
+              "value": "={{ $json.sha256 }}"
+            },
+            {
+              "name": "imageUrl",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "theme",
+              "value": "={{ $json.theme || 'default' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-job",
+      "name": "Create Job in Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "value": "Job created successfully"
+            },
+            {
+              "name": "jobId",
+              "value": "={{ $json.jobId }}"
+            },
+            {
+              "name": "sku",
+              "value": "={{ $json.job.sku }}"
+            }
+          ]
+        }
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [750, 300]
+    }
+  ],
+  "connections": {
+    "webhook-trigger": {
+      "main": [
+        [
+          {
+            "node": "create-job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create-job": {
+      "main": [
+        [
+          {
+            "node": "success-response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false
+}
