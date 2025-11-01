@@ -18,6 +18,7 @@ import {
   getJobStats,
   hasReachedImageLimit
 } from './manager.js';
+import { compositeImage } from '../workflows/composite.js';
 import { JobStatus, ErrorCode } from './state-machine.js';
 import { verify3JMSWebhook } from './webhook-verify.js';
 import getS3Storage from '../storage/s3.js';
@@ -294,7 +295,84 @@ router.post('/jobs/:id/backgrounds', async (req, res) => {
 });
 
 // =============================================================================
-// POST /jobs/:id/composite - Update with compositing results
+// POST /jobs/:id/composite/run - Actually run the compositing workflow
+// =============================================================================
+router.post('/jobs/:id/composite/run', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { options = {} } = req.body;
+
+    const job = getJob(id);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    // Validate job has mask and background
+    if (!job.s3_mask_key) {
+      return res.status(400).json({ error: 'Job has no mask - run segmentation first' });
+    }
+
+    if (!job.s3_bg_keys || job.s3_bg_keys.length === 0) {
+      return res.status(400).json({ error: 'Job has no backgrounds - run background generation first' });
+    }
+
+    const maskS3Key = job.s3_mask_key;
+    const backgroundS3Key = JSON.parse(job.s3_bg_keys)[0]; // Use first background
+
+    console.log('[CompositeRun] Starting composite for job:', id);
+
+    // Run compositing workflow
+    const result = await compositeImage({
+      maskS3Key,
+      backgroundS3Key,
+      sku: job.sku,
+      sha256: job.img_sha256,
+      theme: job.theme,
+      variant: 1,
+      options
+    });
+
+    if (!result.success) {
+      // Mark job as failed
+      failJob(id, ErrorCode.COMPOSITE_ERROR, result.error);
+
+      return res.status(500).json({
+        error: 'Compositing failed',
+        details: result.error
+      });
+    }
+
+    // Update job with composite S3 key
+    updateJobS3Keys(id, {
+      composites: [result.s3Key]
+    });
+
+    // Transition to SHOPIFY_PUSH
+    const statusResult = updateJobStatus(id, JobStatus.SHOPIFY_PUSH);
+
+    if (!statusResult.success) {
+      return res.status(400).json({ error: statusResult.error });
+    }
+
+    res.json({
+      jobId: id,
+      status: JobStatus.SHOPIFY_PUSH,
+      message: 'Compositing complete, ready for Shopify upload',
+      composite: {
+        s3Key: result.s3Key,
+        s3Url: result.s3Url,
+        metadata: result.metadata
+      }
+    });
+
+  } catch (error) {
+    console.error('[CompositeRun] Error:', error);
+    res.status(500).json({ error: 'Failed to run composite', details: error.message });
+  }
+});
+
+// =============================================================================
+// POST /jobs/:id/composite - Update with compositing results (for manual use)
 // =============================================================================
 router.post('/jobs/:id/composite', async (req, res) => {
   try {

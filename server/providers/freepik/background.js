@@ -132,9 +132,9 @@ export class FreepikBackgroundProvider extends BaseProvider {
       const payload = {
         prompt,
         resolution, // '2k' or '4k'
-        aspect_ratio: aspectRatio, // e.g., '1:1', '16:9'
-        model: 'mystic', // Freepik's model name
-        engine: 'Illusio', // Options: Illusio, Sharpy, Sparkle
+        aspect_ratio: aspectRatio, // e.g., 'square_1_1', 'widescreen_16_9'
+        model: 'realism', // Options: fluid, realism, zen, flexible, super_real, editorial_portraits
+        engine: 'magnific_illusio', // Options: automatic, magnific_illusio, magnific_sharpy, magnific_sparkle
         creative_detailing: 5, // 0-10 scale, 5 is balanced
         guidance_scale: 7.5, // How closely to follow prompt
         num_inference_steps: 50, // Quality vs speed tradeoff
@@ -159,23 +159,34 @@ export class FreepikBackgroundProvider extends BaseProvider {
 
       const result = await response.json();
 
-      // Response format (varies by endpoint):
-      // {
-      //   "data": {
-      //     "url": "generated_image_url",
-      //     "id": "unique_id",
-      //     ...
-      //   }
-      // }
+      // Debug: log the actual response structure
+      this.log('debug', 'Freepik API response', { result });
 
-      if (!result.data || !result.data.url) {
-        throw new Error('Invalid response from Freepik API');
+      // Response format might be:
+      // Option 1: { data: { url: "...", id: "..." } }
+      // Option 2: { url: "...", id: "..." }
+      // Option 3: { image: { url: "..." } }
+
+      let imageUrl;
+      let imageId;
+
+      if (result.data && result.data.url) {
+        imageUrl = result.data.url;
+        imageId = result.data.id;
+      } else if (result.url) {
+        imageUrl = result.url;
+        imageId = result.id;
+      } else if (result.image && result.image.url) {
+        imageUrl = result.image.url;
+        imageId = result.image.id || result.id;
+      } else {
+        throw new Error(`Invalid response from Freepik API: ${JSON.stringify(result)}`);
       }
 
       return {
         success: true,
-        url: result.data.url,
-        id: result.data.id
+        url: imageUrl,
+        id: imageId
       };
 
     } catch (error) {
@@ -234,25 +245,35 @@ export class FreepikBackgroundProvider extends BaseProvider {
 
   /**
    * Calculate aspect ratio from dimensions
+   * Freepik accepted values: square_1_1, classic_4_3, traditional_3_4, widescreen_16_9,
+   * social_story_9_16, smartphone_horizontal_20_9, smartphone_vertical_9_20,
+   * film_horizontal_21_9, film_vertical_9_21, standard_3_2, portrait_2_3,
+   * horizontal_2_1, vertical_1_2, social_5_4, social_post_4_5
    */
   calculateAspectRatio(dimensions) {
     if (!dimensions || !dimensions.width || !dimensions.height) {
-      return '1:1'; // Default square
+      return 'square_1_1'; // Default square
     }
 
     const { width, height } = dimensions;
     const ratio = width / height;
 
-    // Common ratios
-    if (Math.abs(ratio - 1) < 0.1) return '1:1'; // Square
-    if (Math.abs(ratio - 16/9) < 0.1) return '16:9'; // Widescreen
-    if (Math.abs(ratio - 4/3) < 0.1) return '4:3'; // Standard
-    if (Math.abs(ratio - 3/2) < 0.1) return '3:2'; // Photo
-    if (Math.abs(ratio - 9/16) < 0.1) return '9:16'; // Portrait
+    // Map to Freepik's aspect ratio values
+    if (Math.abs(ratio - 1) < 0.1) return 'square_1_1';
+    if (Math.abs(ratio - 16/9) < 0.1) return 'widescreen_16_9';
+    if (Math.abs(ratio - 4/3) < 0.1) return 'classic_4_3';
+    if (Math.abs(ratio - 3/4) < 0.1) return 'traditional_3_4';
+    if (Math.abs(ratio - 9/16) < 0.1) return 'social_story_9_16';
+    if (Math.abs(ratio - 3/2) < 0.1) return 'standard_3_2';
+    if (Math.abs(ratio - 2/3) < 0.1) return 'portrait_2_3';
+    if (Math.abs(ratio - 2/1) < 0.1) return 'horizontal_2_1';
+    if (Math.abs(ratio - 1/2) < 0.1) return 'vertical_1_2';
+    if (Math.abs(ratio - 5/4) < 0.1) return 'social_5_4';
+    if (Math.abs(ratio - 4/5) < 0.1) return 'social_post_4_5';
 
     // Default to closest standard ratio
-    if (ratio > 1) return '16:9'; // Landscape
-    return '9:16'; // Portrait
+    if (ratio > 1) return 'widescreen_16_9'; // Landscape
+    return 'social_story_9_16'; // Portrait
   }
 
   /**
