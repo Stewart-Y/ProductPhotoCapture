@@ -428,8 +428,21 @@ export function getProcessorStatus() {
   };
 }
 
+/**
+ * Get processor configuration
+ */
+export function getProcessorConfig() {
+  return {
+    pollInterval: CONFIG.pollInterval,
+    concurrency: CONFIG.concurrency,
+    maxRetries: CONFIG.maxRetries,
+    version: '2.0'
+  };
+}
+
 export default {
   startProcessor,
   stopProcessor,
-  getProcessorStatus
+  getProcessorStatus,
+  getProcessorConfig
 };

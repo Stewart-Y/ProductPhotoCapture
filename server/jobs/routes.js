@@ -22,6 +22,7 @@ import { compositeImage } from '../workflows/composite.js';
 import { JobStatus, ErrorCode } from './state-machine.js';
 import { verify3JMSWebhook } from './webhook-verify.js';
 import getS3Storage from '../storage/s3.js';
+import { getProcessorStatus, getProcessorConfig } from '../workflows/processor.js';
 
 const router = express.Router();
 const s3 = getS3Storage();
@@ -131,6 +132,19 @@ router.post('/jobs/:id/start', async (req, res) => {
   } catch (error) {
     console.error('[Job Start] Error:', error);
     res.status(500).json({ error: 'Failed to start job', details: error.message });
+  }
+});
+
+// =============================================================================
+// GET /jobs/stats - Get job statistics
+// =============================================================================
+router.get('/jobs/stats', (req, res) => {
+  try {
+    const stats = getJobStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('[Job Stats] Error:', error);
+    res.status(500).json({ error: 'Failed to get job stats', details: error.message });
   }
 });
 
@@ -517,15 +531,28 @@ router.get('/jobs', (req, res) => {
 });
 
 // =============================================================================
-// GET /jobs/stats - Get job statistics
+// GET /processor/status - Get processor status
 // =============================================================================
-router.get('/jobs/stats', (req, res) => {
+router.get('/processor/status', (req, res) => {
   try {
-    const stats = getJobStats();
-    res.json(stats);
+    const status = getProcessorStatus();
+    res.json(status);
   } catch (error) {
-    console.error('[Job Stats] Error:', error);
-    res.status(500).json({ error: 'Failed to get job stats', details: error.message });
+    console.error('[Processor Status] Error:', error);
+    res.status(500).json({ error: 'Failed to get processor status', details: error.message });
+  }
+});
+
+// =============================================================================
+// GET /processor/config - Get processor configuration
+// =============================================================================
+router.get('/processor/config', (req, res) => {
+  try {
+    const config = getProcessorConfig();
+    res.json(config);
+  } catch (error) {
+    console.error('[Processor Config] Error:', error);
+    res.status(500).json({ error: 'Failed to get processor config', details: error.message });
   }
 });
 
