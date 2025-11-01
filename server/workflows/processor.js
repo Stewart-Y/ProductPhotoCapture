@@ -412,7 +412,7 @@ async function processJob(jobId) {
 
   } catch (error) {
     console.error(`[Processor] [${jobId}] Pipeline error:`, error);
-    failJob(jobId, ErrorCode.UNKNOWN, error.message, { stack: error.stack });
+    failJob(jobId, ErrorCode.UNKNOWN, error.message, error.stack);
   }
 }
 

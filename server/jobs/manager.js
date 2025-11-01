@@ -112,7 +112,12 @@ export function listJobs(filters = {}) {
   query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
   params.push(limit, offset);
 
-  return db.prepare(query).all(...params);
+  try {
+    return db.prepare(query).all(...params);
+  } catch (err) {
+    console.error(`[JobManager] listJobs error - Query: ${query}, Params: ${params.length} items (${params.join(', ')})`, err.message);
+    throw err;
+  }
 }
 
 /**
@@ -138,12 +143,23 @@ export function updateJobStatus(jobId, newStatus, updates = {}) {
   // Build UPDATE query dynamically based on provided updates
   const finalUpdates = transition.updates;
   const fields = Object.keys(finalUpdates);
+
+  if (fields.length === 0) {
+    console.error(`[JobManager] ❌ No fields to update for job ${jobId}`);
+    return { success: false, error: 'No fields to update' };
+  }
+
   const setClause = fields.map(f => `${f} = ?`).join(', ');
   const values = fields.map(f => finalUpdates[f]);
 
-  db.prepare(`
-    UPDATE jobs SET ${setClause} WHERE id = ?
-  `).run(...values, jobId);
+  try {
+    const query = `UPDATE jobs SET ${setClause} WHERE id = ?`;
+    db.prepare(query).run(...values, jobId);
+  } catch (err) {
+    console.error(`[JobManager] ❌ Database update error for job ${jobId}:`, err.message);
+    console.error(`[JobManager] Fields: ${fields.join(', ')}, Values: ${values.length} items`);
+    throw err;
+  }
 
   const updatedJob = getJob(jobId);
   console.log(`[JobManager] ✅ Updated job ${jobId}: ${job.status} -> ${newStatus}`);
