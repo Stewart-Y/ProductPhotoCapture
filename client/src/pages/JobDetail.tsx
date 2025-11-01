@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useJob, useRetryJob, useFailJob } from '../hooks';
-import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Input } from '../components/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Input } from '../components/ui';
 import { formatCurrency, formatDuration, formatRelativeTime } from '../lib/utils';
 import { AlertCircle, Copy, Check } from 'lucide-react';
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient, type JobFilters, type Job } from '../lib/api-client';
+import { apiClient, type JobFilters } from '../lib/api-client';
 
 const JOBS_QUERY_KEY = ['jobs'];
 

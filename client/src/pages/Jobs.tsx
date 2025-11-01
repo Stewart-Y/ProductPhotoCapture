@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useJobs, useRetryJob } from '../hooks';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Select, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui';
 import { formatCurrency, formatRelativeTime } from '../lib/utils';
-import { JobStatus } from '../lib/api-client';
+import type { JobStatus } from '../lib/api-client';
 
 const ALL_STATUSES: JobStatus[] = [
   'NEW',
