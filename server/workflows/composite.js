@@ -7,6 +7,7 @@
 
 import sharp from 'sharp';
 import { getStorage } from '../storage/index.js';
+import { normalizeToSRGB } from './srgb-normalizer.js';
 
 /**
  * Composite mask onto background
@@ -67,10 +68,18 @@ export async function compositeImage({
       hasAlpha: maskMeta.hasAlpha
     });
 
-    // Step 3: Resize background to match mask dimensions
+    // Step 3: Normalize mask and background to sRGB (Flow v2)
+    console.log('[Compositor] Normalizing to sRGB colorspace...');
+
+    const [normalizedMask, normalizedBackground] = await Promise.all([
+      normalizeToSRGB(maskBuffer, { keepExif: false }),
+      normalizeToSRGB(backgroundBuffer, { keepExif: false })
+    ]);
+
+    // Step 4: Resize background to match mask dimensions
     console.log('[Compositor] Resizing background to match mask...');
 
-    const resizedBackground = await sharp(backgroundBuffer)
+    const resizedBackground = await sharp(normalizedBackground)
       .resize(maskMeta.width, maskMeta.height, {
         fit: options.fit || 'cover',       // cover, contain, fill, inside, outside
         position: options.position || 'center',
@@ -78,17 +87,49 @@ export async function compositeImage({
       })
       .toBuffer();
 
-    // Step 4: Composite mask over background
-    console.log('[Compositor] Compositing mask onto background...');
+    // Step 5: Create drop shadow (Flow v2)
+    const shadowEnabled = options.dropShadow !== false; // Enabled by default
+    let shadowBuffer = null;
 
-    const compositeSharp = sharp(resizedBackground)
-      .composite([{
-        input: maskBuffer,
-        blend: options.blend || 'over',    // Alpha blending mode
+    if (shadowEnabled) {
+      console.log('[Compositor] Creating drop shadow...');
+
+      const shadowConfig = {
+        blur: options.shadowBlur || 20,
+        opacity: options.shadowOpacity || 0.3,
+        offsetX: options.shadowOffsetX || 5,
+        offsetY: options.shadowOffsetY || 5
+      };
+
+      shadowBuffer = await createDropShadow(normalizedMask, maskMeta, shadowConfig);
+    }
+
+    // Step 6: Auto-center and composite (Flow v2)
+    console.log('[Compositor] Auto-centering and compositing...');
+
+    const compositeSharp = sharp(resizedBackground);
+
+    const compositeInputs = [];
+
+    // Add drop shadow first (behind the mask)
+    if (shadowBuffer) {
+      compositeInputs.push({
+        input: shadowBuffer,
+        blend: 'over',
         gravity: 'center'
-      }]);
+      });
+    }
 
-    // Step 5: Apply post-processing (optional)
+    // Add mask on top (with auto-centering via gravity)
+    compositeInputs.push({
+      input: normalizedMask,
+      blend: options.blend || 'over',    // Alpha blending mode
+      gravity: options.gravity || 'center' // Auto-center by default
+    });
+
+    compositeSharp.composite(compositeInputs);
+
+    // Step 7: Apply post-processing (optional)
     if (options.sharpen) {
       compositeSharp.sharpen(options.sharpen);
     }
@@ -97,7 +138,7 @@ export async function compositeImage({
       compositeSharp.gamma(options.gamma);
     }
 
-    // Step 6: Convert to output format
+    // Step 8: Convert to output format
     const outputFormat = options.format || 'jpeg';
     const quality = options.quality || 90;
 
@@ -133,10 +174,11 @@ export async function compositeImage({
     console.log('[Compositor] Composite created:', {
       size: `${(compositeBuffer.length / 1024).toFixed(2)}KB`,
       format: outputFormat,
-      quality
+      quality,
+      dropShadow: shadowEnabled
     });
 
-    // Step 7: Upload to S3
+    // Step 9: Upload to S3
     const aspect = options.aspect || '1x1';
     const type = options.type || 'master';
     const compositeS3Key = storage.getCompositeKey(sku, sha256, theme, aspect, variant, type);
@@ -146,7 +188,7 @@ export async function compositeImage({
 
     await storage.uploadBuffer(compositeS3Key, compositeBuffer, contentType);
 
-    // Step 8: Generate presigned URL
+    // Step 10: Generate presigned URL
     const compositeS3Url = await storage.getPresignedGetUrl(compositeS3Key, 3600);
 
     const duration = Date.now() - startTime;
@@ -158,7 +200,7 @@ export async function compositeImage({
       duration: `${duration}ms`
     });
 
-    // Step 9: Get final image metadata
+    // Step 11: Get final image metadata
     const finalMeta = await sharp(compositeBuffer).metadata();
 
     return {
@@ -195,6 +237,58 @@ export async function compositeImage({
         duration
       }
     };
+  }
+}
+
+/**
+ * Create drop shadow from mask (Flow v2)
+ *
+ * Generates a soft drop shadow by:
+ * 1. Extracting alpha channel from mask
+ * 2. Blurring the alpha channel
+ * 3. Reducing opacity
+ * 4. Offsetting position
+ */
+async function createDropShadow(maskBuffer, maskMeta, config) {
+  try {
+    // Extract alpha channel from mask
+    const alphaChannel = await sharp(maskBuffer)
+      .extractChannel('alpha')
+      .toBuffer();
+
+    // Create shadow by blurring alpha and converting to grayscale
+    const shadowBuffer = await sharp(alphaChannel)
+      .resize(maskMeta.width, maskMeta.height)
+      .blur(config.blur) // Blur the shadow
+      .linear(config.opacity, 0) // Reduce opacity (multiply alpha by opacity factor)
+      .toColorspace('srgb')
+      .toBuffer();
+
+    // Convert grayscale shadow to RGBA with alpha channel
+    const shadowRGBA = await sharp(shadowBuffer)
+      .flatten({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .ensureAlpha()
+      .toBuffer();
+
+    console.log('[Compositor] Drop shadow created:', {
+      blur: config.blur,
+      opacity: config.opacity,
+      offset: `${config.offsetX}px, ${config.offsetY}px`
+    });
+
+    return shadowRGBA;
+
+  } catch (error) {
+    console.error('[Compositor] Failed to create drop shadow:', error.message);
+    // Return transparent buffer if shadow creation fails
+    return await sharp({
+      create: {
+        width: maskMeta.width,
+        height: maskMeta.height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      }
+    }).png().toBuffer();
   }
 }
 

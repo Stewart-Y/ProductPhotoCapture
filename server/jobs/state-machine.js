@@ -5,16 +5,22 @@
  * Ensures jobs move through states correctly and prevents invalid transitions.
  */
 
-// Valid job statuses
+// Valid job statuses (Flow v2)
 export const JobStatus = {
   NEW: 'NEW',                           // Job created, not yet started
-  QUEUED: 'QUEUED',                     // Job queued for processing
-  SEGMENTING: 'SEGMENTING',             // AI segmentation in progress
-  BG_GENERATING: 'BG_GENERATING',       // Background generation in progress
-  COMPOSITING: 'COMPOSITING',           // Server-side compositing in progress
+  QUEUED: 'QUEUED',                     // Job queued for processing (legacy - kept for compatibility)
+  BG_REMOVED: 'BG_REMOVED',             // Background removal complete (cutout + mask stored)
+  BACKGROUND_READY: 'BACKGROUND_READY', // Background variants generated
+  COMPOSITED: 'COMPOSITED',             // Compositing complete (with shadow + centering)
+  DERIVATIVES: 'DERIVATIVES',           // Derivatives generated (multiple sizes + formats)
   SHOPIFY_PUSH: 'SHOPIFY_PUSH',         // Uploading to Shopify
   DONE: 'DONE',                         // Successfully completed
-  FAILED: 'FAILED'                      // Permanent failure
+  FAILED: 'FAILED',                     // Permanent failure
+
+  // Legacy states (Flow v1 - kept for backward compatibility)
+  SEGMENTING: 'SEGMENTING',             // Legacy: AI segmentation in progress
+  BG_GENERATING: 'BG_GENERATING',       // Legacy: Background generation in progress
+  COMPOSITING: 'COMPOSITING'            // Legacy: Server-side compositing in progress
 };
 
 // Valid error codes
@@ -34,14 +40,21 @@ export const ErrorCode = {
 
 // Valid state transitions (from -> to[])
 const VALID_TRANSITIONS = {
-  [JobStatus.NEW]: [JobStatus.QUEUED, JobStatus.FAILED],
+  // Flow v2 transitions (NEW -> BG_REMOVED -> BACKGROUND_READY -> COMPOSITED -> DERIVATIVES -> SHOPIFY_PUSH -> DONE)
+  [JobStatus.NEW]: [JobStatus.BG_REMOVED, JobStatus.FAILED],
+  [JobStatus.BG_REMOVED]: [JobStatus.BACKGROUND_READY, JobStatus.FAILED],
+  [JobStatus.BACKGROUND_READY]: [JobStatus.COMPOSITED, JobStatus.FAILED],
+  [JobStatus.COMPOSITED]: [JobStatus.DERIVATIVES, JobStatus.FAILED],
+  [JobStatus.DERIVATIVES]: [JobStatus.SHOPIFY_PUSH, JobStatus.FAILED],
+  [JobStatus.SHOPIFY_PUSH]: [JobStatus.DONE, JobStatus.FAILED],
+  [JobStatus.DONE]: [], // Terminal state
+  [JobStatus.FAILED]: [], // Terminal state
+
+  // Legacy Flow v1 transitions (kept for backward compatibility)
   [JobStatus.QUEUED]: [JobStatus.SEGMENTING, JobStatus.FAILED],
   [JobStatus.SEGMENTING]: [JobStatus.BG_GENERATING, JobStatus.FAILED],
   [JobStatus.BG_GENERATING]: [JobStatus.COMPOSITING, JobStatus.FAILED],
-  [JobStatus.COMPOSITING]: [JobStatus.SHOPIFY_PUSH, JobStatus.FAILED],
-  [JobStatus.SHOPIFY_PUSH]: [JobStatus.DONE, JobStatus.FAILED],
-  [JobStatus.DONE]: [], // Terminal state
-  [JobStatus.FAILED]: [] // Terminal state
+  [JobStatus.COMPOSITING]: [JobStatus.SHOPIFY_PUSH, JobStatus.FAILED]
 };
 
 /**
@@ -81,14 +94,21 @@ export function isTerminalStatus(status) {
  * Each state has required fields that must be present
  */
 const REQUIRED_FIELDS = {
+  // Flow v2 required fields
   [JobStatus.NEW]: ['sku', 'img_sha256', 'theme'],
+  [JobStatus.BG_REMOVED]: ['s3_original_key', 's3_cutout_key', 's3_mask_key'],
+  [JobStatus.BACKGROUND_READY]: ['s3_bg_keys'], // JSON array, ≥2 items
+  [JobStatus.COMPOSITED]: ['s3_composite_keys'], // JSON array
+  [JobStatus.DERIVATIVES]: ['s3_derivative_keys', 'manifest_s3_key'],
+  [JobStatus.SHOPIFY_PUSH]: ['shopify_media_ids'], // JSON array
+  [JobStatus.DONE]: ['manifest_s3_key'],
+  [JobStatus.FAILED]: ['error_code', 'error_message'],
+
+  // Legacy Flow v1 required fields (kept for backward compatibility)
   [JobStatus.QUEUED]: ['source_url'],
   [JobStatus.SEGMENTING]: ['s3_original_key'],
   [JobStatus.BG_GENERATING]: ['s3_mask_key'],
-  [JobStatus.COMPOSITING]: ['s3_bg_keys'], // JSON array
-  [JobStatus.SHOPIFY_PUSH]: ['s3_composite_keys'], // JSON array
-  [JobStatus.DONE]: ['shopify_media_ids'], // JSON array
-  [JobStatus.FAILED]: ['error_code', 'error_message']
+  [JobStatus.COMPOSITING]: ['s3_bg_keys'] // Legacy compositing state
 };
 
 /**
@@ -213,14 +233,21 @@ export function getRetryDelay(attempt) {
  */
 export function getStatusDescription(status) {
   const descriptions = {
+    // Flow v2 descriptions
     [JobStatus.NEW]: 'Job created, awaiting processing',
-    [JobStatus.QUEUED]: 'Job queued for processing',
-    [JobStatus.SEGMENTING]: 'AI removing background from image',
-    [JobStatus.BG_GENERATING]: 'AI generating themed background',
-    [JobStatus.COMPOSITING]: 'Compositing bottle with new background',
+    [JobStatus.BG_REMOVED]: 'Background removed (cutout + mask ready)',
+    [JobStatus.BACKGROUND_READY]: 'AI-generated backgrounds ready',
+    [JobStatus.COMPOSITED]: 'Composites created (with shadow + centering)',
+    [JobStatus.DERIVATIVES]: 'Multi-format derivatives generated',
     [JobStatus.SHOPIFY_PUSH]: 'Uploading to Shopify',
     [JobStatus.DONE]: 'Successfully completed',
-    [JobStatus.FAILED]: 'Failed - see error details'
+    [JobStatus.FAILED]: 'Failed - see error details',
+
+    // Legacy Flow v1 descriptions
+    [JobStatus.QUEUED]: 'Job queued for processing (legacy)',
+    [JobStatus.SEGMENTING]: 'AI removing background from image (legacy)',
+    [JobStatus.BG_GENERATING]: 'AI generating themed background (legacy)',
+    [JobStatus.COMPOSITING]: 'Compositing bottle with new background (legacy)'
   };
   return descriptions[status] || 'Unknown status';
 }
@@ -232,14 +259,21 @@ export function getStatusDescription(status) {
  */
 export function estimateRemainingTime(status) {
   const estimates = {
-    [JobStatus.NEW]: 300, // 5 minutes
+    // Flow v2 estimates
+    [JobStatus.NEW]: 360, // 6 minutes (download + BG removal + BG gen + composite + derivatives)
+    [JobStatus.BG_REMOVED]: 300, // 5 minutes (BG gen + composite + derivatives)
+    [JobStatus.BACKGROUND_READY]: 120, // 2 minutes (composite + derivatives)
+    [JobStatus.COMPOSITED]: 60, // 1 minute (derivatives generation)
+    [JobStatus.DERIVATIVES]: 30, // 30 seconds (Shopify upload)
+    [JobStatus.SHOPIFY_PUSH]: 15, // 15 seconds
+    [JobStatus.DONE]: 0,
+    [JobStatus.FAILED]: 0,
+
+    // Legacy Flow v1 estimates
     [JobStatus.QUEUED]: 280,
     [JobStatus.SEGMENTING]: 240, // 4 minutes (AI processing)
     [JobStatus.BG_GENERATING]: 180, // 3 minutes (AI processing)
-    [JobStatus.COMPOSITING]: 60, // 1 minute (server-side)
-    [JobStatus.SHOPIFY_PUSH]: 30, // 30 seconds
-    [JobStatus.DONE]: 0,
-    [JobStatus.FAILED]: 0
+    [JobStatus.COMPOSITING]: 60 // 1 minute (server-side)
   };
   return estimates[status] || 0;
 }

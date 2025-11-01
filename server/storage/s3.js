@@ -42,6 +42,14 @@ class S3Storage {
   }
 
   /**
+   * Generate deterministic S3 key for cutout (Flow v2)
+   * Pattern: cutouts/{sku}/{sha256}.png
+   */
+  getCutoutKey(sku, sha256) {
+    return `cutouts/${sku}/${sha256}.png`;
+  }
+
+  /**
    * Generate deterministic S3 key for background
    * Pattern: backgrounds/{theme}/{sku}/{sha256}_{variant}.jpg
    */
@@ -65,6 +73,26 @@ class S3Storage {
    */
   getThumbnailKey(sku, sha256) {
     return `thumbs/${sku}/${sha256}_400.jpg`;
+  }
+
+  /**
+   * Generate deterministic S3 key for derivative (Flow v2)
+   * Pattern: derivatives/{theme}/{sku}/{sha256}/{variant}_{size}.{ext}
+   * Examples:
+   *   derivatives/default/VWS200433868/abc123.../1_hero.jpg
+   *   derivatives/default/VWS200433868/abc123.../1_pdp.webp
+   *   derivatives/default/VWS200433868/abc123.../1_thumb.avif
+   */
+  getDerivativeKey(sku, sha256, theme = 'default', variant = 1, size = 'hero', ext = 'jpg') {
+    return `derivatives/${theme}/${sku}/${sha256}/${variant}_${size}.${ext}`;
+  }
+
+  /**
+   * Generate deterministic S3 key for manifest (Flow v2)
+   * Pattern: manifests/{sku}/{sha256}-{theme}.json
+   */
+  getManifestKey(sku, sha256, theme = 'default') {
+    return `manifests/${sku}/${sha256}-${theme}.json`;
   }
 
   /**

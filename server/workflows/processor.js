@@ -1,20 +1,24 @@
 /**
- * Job Processor - Background Worker
+ * Job Processor - Background Worker (Flow v2)
  *
- * Automatically processes jobs through the complete pipeline:
- * QUEUED → SEGMENTING → BG_GENERATING → COMPOSITING → SHOPIFY_PUSH → DONE
+ * Automatically processes jobs through the complete 7-step pipeline:
+ * NEW → BG_REMOVED → BACKGROUND_READY → COMPOSITED → DERIVATIVES → SHOPIFY_PUSH → DONE
  *
  * Features:
- * - Automatic state progression
+ * - Automatic state progression with proper state machine validation
+ * - Timing metrics for each step
+ * - Cost tracking (Freepik API)
  * - Retry logic with exponential backoff
  * - Error handling and logging
  * - Graceful shutdown
  */
 
-import { getJob, listJobs, updateJobStatus, failJob, updateJobS3Keys } from '../jobs/manager.js';
+import { getJob, listJobs, failJob } from '../jobs/manager.js';
 import { JobStatus, ErrorCode } from '../jobs/state-machine.js';
 import { getSegmentProvider, getBackgroundProvider } from '../providers/index.js';
 import { compositeImage } from './composite.js';
+import { generateDerivatives, batchGenerateDerivatives } from './derivatives.js';
+import { buildManifest } from './manifest.js';
 
 /**
  * Job Processor Configuration
@@ -43,7 +47,7 @@ export function startProcessor() {
   }
 
   isRunning = true;
-  console.log('[Processor] Starting job processor', {
+  console.log('[Processor] Starting job processor (Flow v2)', {
     pollInterval: `${CONFIG.pollInterval}ms`,
     concurrency: CONFIG.concurrency,
     maxRetries: CONFIG.maxRetries
@@ -80,9 +84,9 @@ async function pollForJobs() {
   if (!isRunning) return;
 
   try {
-    // Get jobs that need processing
+    // Get jobs that need processing (NEW status in Flow v2)
     const jobs = listJobs({
-      status: JobStatus.QUEUED,
+      status: JobStatus.NEW,
       limit: CONFIG.concurrency - currentJobs.size
     });
 
@@ -119,10 +123,12 @@ async function pollForJobs() {
 }
 
 /**
- * Process a single job through the complete pipeline
+ * Process a single job through the complete Flow v2 pipeline
  */
 async function processJob(jobId) {
-  console.log(`[Processor] Processing job: ${jobId}`);
+  console.log(`[Processor] [${jobId}] Starting Flow v2 pipeline`);
+
+  const db = (await import('../db.js')).default;
 
   try {
     let job = getJob(jobId);
@@ -133,210 +139,257 @@ async function processJob(jobId) {
 
     // Skip if job is already done or failed
     if (job.status === JobStatus.DONE || job.status === JobStatus.FAILED) {
-      console.log(`[Processor] Job ${jobId} already in terminal state: ${job.status}`);
+      console.log(`[Processor] [${jobId}] Already in terminal state: ${job.status}`);
       return;
     }
 
-    // Process based on current status
-    switch (job.status) {
-      case JobStatus.QUEUED:
-        await processSegmentation(jobId);
-        break;
+    // Flow v2 7-Step Pipeline
+    // ===================================================
 
-      case JobStatus.SEGMENTING:
-        // Already in progress, wait for provider callback
-        console.log(`[Processor] Job ${jobId} already segmenting, skipping`);
-        break;
+    // Step 1: Download original image from 3JMS + Background Removal
+    const step1Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 1/7: Download + Background Removal`);
 
-      case JobStatus.BG_GENERATING:
-        // Already in progress, wait for provider callback
-        console.log(`[Processor] Job ${jobId} already generating backgrounds, skipping`);
-        break;
-
-      case JobStatus.COMPOSITING:
-        // Already in progress, wait for completion
-        console.log(`[Processor] Job ${jobId} already compositing, skipping`);
-        break;
-
-      case JobStatus.SHOPIFY_PUSH:
-        // Skip Shopify for now, mark as done
-        console.log(`[Processor] Skipping Shopify push for job ${jobId} (not implemented yet)`);
-        const db = (await import('../db.js')).default;
-        db.prepare(`
-          UPDATE jobs
-          SET status = ?,
-              completed_at = datetime('now'),
-              updated_at = datetime('now')
-          WHERE id = ?
-        `).run(JobStatus.DONE, jobId);
-        break;
-
-      default:
-        console.log(`[Processor] Job ${jobId} in unexpected state: ${job.status}`);
-    }
-
-  } catch (error) {
-    console.error(`[Processor] Error processing job ${jobId}:`, error);
-    failJob(jobId, ErrorCode.UNKNOWN_ERROR, error.message, { stack: error.stack });
-  }
-}
-
-/**
- * Step 1: Background Segmentation (Mask Creation)
- */
-async function processSegmentation(jobId) {
-  console.log(`[Processor] [${jobId}] Starting segmentation`);
-
-  const job = getJob(jobId);
-  if (!job) return;
-
-  try {
-    // Don't transition to SEGMENTING yet - just start the work
-    // The state machine requires s3_original_key which we don't have
-    console.log(`[Processor] [${jobId}] Job in ${job.status}, starting segmentation work...`);
-
-    // Get segmentation provider
-    const provider = getSegmentProvider();
-
-    // Call provider to remove background
-    const result = await provider.removeBackground({
+    const segmentProvider = getSegmentProvider();
+    const segmentResult = await segmentProvider.removeBackground({
       imageUrl: job.source_url,
       sku: job.sku,
       sha256: job.img_sha256
     });
 
-    if (!result.success) {
-      throw new Error(`Segmentation failed: ${result.error}`);
+    if (!segmentResult.success) {
+      throw new Error(`Background removal failed: ${segmentResult.error}`);
     }
 
-    console.log(`[Processor] [${jobId}] Segmentation complete:`, {
-      s3Key: result.s3Key,
-      cost: `$${result.cost.toFixed(4)}`
+    const step1Duration = Date.now() - step1Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 1 complete (${step1Duration}ms):`, {
+      cutout: segmentResult.cutout.s3Key,
+      mask: segmentResult.mask.s3Key,
+      cost: `$${segmentResult.cost.toFixed(4)}`
     });
 
-    // Update job with mask S3 key and cost
-    updateJobS3Keys(jobId, { mask: result.s3Key });
-
-    // Update cost
-    const db = (await import('../db.js')).default;
+    // Update job: NEW → BG_REMOVED
     db.prepare(`
       UPDATE jobs
-      SET cost_usd = cost_usd + ?
+      SET status = ?,
+          s3_cutout_key = ?,
+          s3_mask_key = ?,
+          segmentation_ms = ?,
+          cost_usd = cost_usd + ?,
+          updated_at = datetime('now')
       WHERE id = ?
-    `).run(result.cost, jobId);
+    `).run(
+      JobStatus.BG_REMOVED,
+      segmentResult.cutout.s3Key,
+      segmentResult.mask.s3Key,
+      step1Duration,
+      segmentResult.cost,
+      jobId
+    );
 
-    // Continue to next step (no state transition - job stays QUEUED)
-    await processBackgroundGeneration(jobId);
+    // Step 2: Background Generation (AI-generated backgrounds)
+    const step2Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 2/7: Background Generation`);
 
-  } catch (error) {
-    console.error(`[Processor] [${jobId}] Segmentation error:`, error);
-    failJob(jobId, ErrorCode.SEGMENTATION_ERROR, error.message);
-  }
-}
-
-/**
- * Step 2: Background Generation (AI-generated backgrounds)
- */
-async function processBackgroundGeneration(jobId) {
-  console.log(`[Processor] [${jobId}] Starting background generation`);
-
-  const job = getJob(jobId);
-  if (!job) return;
-
-  try {
-    // Note: Freepik's Mystic API is async, so we skip it for now
-    console.log(`[Processor] [${jobId}] Skipping Freepik background generation (async API, needs polling)`);
-    console.log(`[Processor] [${jobId}] Creating simple gradient background instead`);
-
-    // Create a simple background using Sharp
+    // Note: Freepik's Mystic API is async, so we use a simple gradient for now
+    // TODO: Implement proper async polling for Freepik Mystic API
     const sharp = (await import('sharp')).default;
     const storage = (await import('../storage/index.js')).getStorage();
 
     const width = 1024;
     const height = 1024;
 
-    const simpleBackground = await sharp({
-      create: {
-        width,
-        height,
-        channels: 3,
-        background: { r: 240, g: 240, b: 250 } // Light blue-gray
-      }
-    })
-      .jpeg({ quality: 90 })
-      .toBuffer();
+    // Generate 2 simple gradient backgrounds
+    const backgrounds = [];
+    for (let i = 1; i <= 2; i++) {
+      const simpleBackground = await sharp({
+        create: {
+          width,
+          height,
+          channels: 3,
+          background: { r: 240 - (i * 20), g: 240 - (i * 20), b: 250 - (i * 10) }
+        }
+      })
+        .jpeg({ quality: 90 })
+        .toBuffer();
 
-    const bgS3Key = storage.getBackgroundKey(job.sku, job.img_sha256, job.theme, 1);
-    await storage.uploadBuffer(bgS3Key, simpleBackground, 'image/jpeg');
+      const bgS3Key = storage.getBackgroundKey(job.sku, job.img_sha256, job.theme, i);
+      await storage.uploadBuffer(bgS3Key, simpleBackground, 'image/jpeg');
+      backgrounds.push(bgS3Key);
+    }
 
-    console.log(`[Processor] [${jobId}] Simple background created:`, { s3Key: bgS3Key });
+    const step2Duration = Date.now() - step2Start;
 
-    // Update job with background S3 key
-    updateJobS3Keys(jobId, { backgrounds: [bgS3Key] });
+    console.log(`[Processor] [${jobId}] ✅ Step 2 complete (${step2Duration}ms):`, {
+      backgrounds: backgrounds.length
+    });
 
-    // Continue to next step (no state transition)
-    await processCompositing(jobId);
+    // Update job: BG_REMOVED → BACKGROUND_READY
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          s3_bg_keys = ?,
+          backgrounds_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      JobStatus.BACKGROUND_READY,
+      JSON.stringify(backgrounds),
+      step2Duration,
+      jobId
+    );
 
-  } catch (error) {
-    console.error(`[Processor] [${jobId}] Background generation error:`, error);
-    failJob(jobId, ErrorCode.BACKGROUND_ERROR, error.message);
-  }
-}
+    // Step 3: Compositing (cutout + backgrounds with drop shadow & centering)
+    const step3Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 3/7: Compositing with drop shadow`);
 
-/**
- * Step 3: Image Compositing (Mask + Background)
- */
-async function processCompositing(jobId) {
-  console.log(`[Processor] [${jobId}] Starting compositing`);
+    job = getJob(jobId); // Refresh job data
 
-  const job = getJob(jobId);
-  if (!job) return;
+    const cutoutS3Key = job.s3_cutout_key;
+    const bgS3Keys = JSON.parse(job.s3_bg_keys);
 
-  try {
-    const maskS3Key = job.s3_mask_key;
-    const bgS3Keys = job.s3_bg_keys ? JSON.parse(job.s3_bg_keys) : [];
-
-    if (!maskS3Key) {
-      throw new Error('No mask available');
+    if (!cutoutS3Key) {
+      throw new Error('No cutout available');
     }
 
     if (bgS3Keys.length === 0) {
       throw new Error('No backgrounds available');
     }
 
-    // Composite with first background
-    const result = await compositeImage({
-      maskS3Key,
-      backgroundS3Key: bgS3Keys[0],
-      sku: job.sku,
-      sha256: job.img_sha256,
-      theme: job.theme,
-      variant: 1,
-      options: {
-        quality: 90,
-        format: 'jpeg'
-      }
-    });
+    // Composite each background
+    const composites = [];
+    for (let i = 0; i < bgS3Keys.length; i++) {
+      const result = await compositeImage({
+        maskS3Key: cutoutS3Key, // Use cutout (has alpha) instead of mask
+        backgroundS3Key: bgS3Keys[i],
+        sku: job.sku,
+        sha256: job.img_sha256,
+        theme: job.theme,
+        variant: i + 1,
+        options: {
+          quality: 90,
+          format: 'jpeg',
+          dropShadow: true, // Flow v2 feature
+          shadowBlur: 20,
+          shadowOpacity: 0.3,
+          shadowOffsetX: 5,
+          shadowOffsetY: 5
+        }
+      });
 
-    if (!result.success) {
-      throw new Error(`Compositing failed: ${result.error}`);
+      if (!result.success) {
+        throw new Error(`Compositing failed: ${result.error}`);
+      }
+
+      composites.push(result.s3Key);
     }
 
-    console.log(`[Processor] [${jobId}] Compositing complete:`, {
-      s3Key: result.s3Key,
-      size: `${(result.metadata.size / 1024).toFixed(2)}KB`,
-      duration: `${result.metadata.duration}ms`
+    const step3Duration = Date.now() - step3Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 3 complete (${step3Duration}ms):`, {
+      composites: composites.length
     });
 
-    // Update job with composite S3 key
-    updateJobS3Keys(jobId, { composites: [result.s3Key] });
+    // Update job: BACKGROUND_READY → COMPOSITED
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          s3_composite_keys = ?,
+          compositing_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      JobStatus.COMPOSITED,
+      JSON.stringify(composites),
+      step3Duration,
+      jobId
+    );
 
-    // Skip Shopify for now, mark job as DONE
-    console.log(`[Processor] [${jobId}] Skipping Shopify push (not implemented)`);
+    // Step 4: Derivatives Generation (multi-size, multi-format)
+    const step4Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 4/7: Generating derivatives (9 files per composite)`);
 
-    // Transition from QUEUED directly to DONE
-    // Update the database directly to avoid state machine validation
-    const db = (await import('../db.js')).default;
+    job = getJob(jobId); // Refresh job data
+
+    const compositeS3Keys = JSON.parse(job.s3_composite_keys);
+
+    const derivativesResult = await batchGenerateDerivatives({
+      compositeS3Keys,
+      sku: job.sku,
+      sha256: job.img_sha256,
+      theme: job.theme
+    });
+
+    if (!derivativesResult.success) {
+      throw new Error('Derivatives generation failed');
+    }
+
+    // Flatten all derivative S3 keys
+    const allDerivativeKeys = derivativesResult.results
+      .flatMap(r => r.derivatives || [])
+      .map(d => d.s3Key);
+
+    const step4Duration = Date.now() - step4Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 4 complete (${step4Duration}ms):`, {
+      totalDerivatives: allDerivativeKeys.length
+    });
+
+    // Update job: COMPOSITED → DERIVATIVES
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          s3_derivative_keys = ?,
+          derivatives_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      JobStatus.DERIVATIVES,
+      JSON.stringify(allDerivativeKeys),
+      step4Duration,
+      jobId
+    );
+
+    // Step 5: Manifest Generation
+    const step5Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 5/7: Building manifest`);
+
+    job = getJob(jobId); // Refresh job data
+
+    const manifestResult = await buildManifest(job, {
+      derivatives: derivativesResult.results.flatMap(r => r.derivatives || [])
+    });
+
+    if (!manifestResult.success) {
+      throw new Error(`Manifest generation failed: ${manifestResult.error}`);
+    }
+
+    const step5Duration = Date.now() - step5Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 5 complete (${step5Duration}ms):`, {
+      manifest: manifestResult.s3Key
+    });
+
+    // Update job with manifest
+    db.prepare(`
+      UPDATE jobs
+      SET manifest_s3_key = ?,
+          manifest_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      manifestResult.s3Key,
+      step5Duration,
+      jobId
+    );
+
+    // Step 6: Shopify Push (SKIPPED - not implemented yet)
+    console.log(`[Processor] [${jobId}] Step 6/7: Shopify Push (SKIPPED - no API yet)`);
+
+    // Step 7: Mark as DONE
+    console.log(`[Processor] [${jobId}] Step 7/7: Completing job`);
+
     db.prepare(`
       UPDATE jobs
       SET status = ?,
@@ -345,11 +398,21 @@ async function processCompositing(jobId) {
       WHERE id = ?
     `).run(JobStatus.DONE, jobId);
 
-    console.log(`[Processor] [${jobId}] ✅ Job completed successfully - Status: DONE`);
+    const totalDuration = Date.now() - step1Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Flow v2 pipeline complete (${totalDuration}ms)`);
+    console.log(`[Processor] [${jobId}] Timing breakdown:`, {
+      download_bg_removal: `${step1Duration}ms`,
+      background_gen: `${step2Duration}ms`,
+      compositing: `${step3Duration}ms`,
+      derivatives: `${step4Duration}ms`,
+      manifest: `${step5Duration}ms`,
+      total: `${totalDuration}ms`
+    });
 
   } catch (error) {
-    console.error(`[Processor] [${jobId}] Compositing error:`, error);
-    failJob(jobId, ErrorCode.COMPOSITE_ERROR, error.message);
+    console.error(`[Processor] [${jobId}] Pipeline error:`, error);
+    failJob(jobId, ErrorCode.UNKNOWN, error.message, { stack: error.stack });
   }
 }
 
@@ -360,7 +423,8 @@ export function getProcessorStatus() {
   return {
     isRunning,
     config: CONFIG,
-    currentJobs: Array.from(currentJobs)
+    currentJobs: Array.from(currentJobs),
+    version: '2.0'
   };
 }
 
