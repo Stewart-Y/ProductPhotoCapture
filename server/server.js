@@ -10,6 +10,7 @@ import db from './db.js';
 import tjmsClient from './tjms-client.js';
 import jobRoutes from './jobs/routes.js';
 import { captureRawBody } from './jobs/webhook-verify.js';
+import { startProcessor, stopProcessor } from './workflows/processor.js';
 
 dotenv.config();
 
@@ -591,4 +592,26 @@ app.post('/api/tjms/push/:id', async (req, res) => {
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
+
+  // Start background job processor if enabled
+  const enableWorker = process.env.ENABLE_WORKER !== 'false'; // Default: enabled
+  if (enableWorker) {
+    console.log('[Server] Starting background job processor...');
+    startProcessor();
+  } else {
+    console.log('[Server] Background worker disabled (set ENABLE_WORKER=true to enable)');
+  }
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n[Server] Shutting down gracefully...');
+  stopProcessor();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n[Server] Shutting down gracefully...');
+  stopProcessor();
+  process.exit(0);
 });
