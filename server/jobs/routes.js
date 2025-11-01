@@ -7,6 +7,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
+import db from '../db.js';
 import {
   createJob,
   getJob,
@@ -136,12 +137,43 @@ router.post('/jobs/:id/start', async (req, res) => {
 });
 
 // =============================================================================
-// GET /jobs/stats - Get job statistics
+// GET /jobs/stats - Get job statistics (formatted for dashboard)
 // =============================================================================
 router.get('/jobs/stats', (req, res) => {
   try {
     const stats = getJobStats();
-    res.json(stats);
+
+    // Get today's stats
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const todayJobs = db.prepare(`
+      SELECT status, COUNT(*) as count
+      FROM jobs
+      WHERE created_at >= ? AND created_at < ?
+      GROUP BY status
+    `).all(today.toISOString(), now.toISOString());
+
+    const todayStats = {
+      total: todayJobs.reduce((sum, j) => sum + j.count, 0),
+      done: todayJobs.find(j => j.status === 'DONE')?.count || 0,
+      failed: todayJobs.find(j => j.status === 'FAILED')?.count || 0
+    };
+
+    // Format response for dashboard
+    const dashboardStats = {
+      today: todayStats,
+      cost: {
+        avgPerJob24h: stats.total > 0 ? stats.totalCost / stats.total : 0,
+        totalMTD: stats.totalCost
+      },
+      timing: {
+        avgProcessingTime: stats.avgDuration || 0
+      }
+    };
+
+    res.json(dashboardStats);
   } catch (error) {
     console.error('[Job Stats] Error:', error);
     res.status(500).json({ error: 'Failed to get job stats', details: error.message });
