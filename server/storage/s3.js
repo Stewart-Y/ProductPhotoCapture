@@ -130,6 +130,13 @@ class S3Storage {
   }
 
   /**
+   * Alias for upload() for consistency with provider interface
+   */
+  async uploadBuffer(key, buffer, contentType = 'image/jpeg') {
+    return this.upload(key, buffer, contentType);
+  }
+
+  /**
    * Delete object from S3
    * @param {string} key - S3 object key
    * @returns {Promise<object>} Delete result
