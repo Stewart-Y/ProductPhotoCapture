@@ -204,6 +204,7 @@ router.get('/jobs/:id', (req, res) => {
       s3_bg_keys: job.s3_bg_keys ? JSON.parse(job.s3_bg_keys) : null,
       s3_composite_keys: job.s3_composite_keys ? JSON.parse(job.s3_composite_keys) : null,
       s3_thumb_keys: job.s3_thumb_keys ? JSON.parse(job.s3_thumb_keys) : null,
+      s3_derivative_keys: job.s3_derivative_keys ? JSON.parse(job.s3_derivative_keys) : null,
       shopify_media_ids: job.shopify_media_ids ? JSON.parse(job.shopify_media_ids) : null
     };
 
