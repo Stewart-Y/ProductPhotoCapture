@@ -217,7 +217,62 @@ router.get('/jobs/:id', (req, res) => {
 });
 
 // =============================================================================
-// POST /jobs/:id/presign - Generate presigned URLs for specific keys
+// GET /jobs/:id/presign - Generate presigned GET URL for viewing assets (Query params)
+// =============================================================================
+router.get('/jobs/:id/presign', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // type: 'original', 'cutout', 'mask', 'composite', 'derivative'
+
+    const job = getJob(id);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    let key;
+    let contentType = 'image/jpeg';
+
+    switch (type) {
+      case 'original':
+        key = job.s3_original_key;
+        break;
+      case 'cutout':
+        key = job.s3_cutout_key;
+        contentType = 'image/png';
+        break;
+      case 'mask':
+        key = job.s3_mask_key;
+        contentType = 'image/png';
+        break;
+      case 'composite':
+        // For composites, return the first one if multiple exist
+        key = Array.isArray(job.s3_composite_keys) ? job.s3_composite_keys[0] : null;
+        break;
+      case 'derivative':
+        // For derivatives, return the first one if multiple exist
+        key = Array.isArray(job.s3_derivative_keys) ? job.s3_derivative_keys[0] : null;
+        break;
+      default:
+        return res.status(400).json({ error: 'Invalid type', validTypes: ['original', 'cutout', 'mask', 'composite', 'derivative'] });
+    }
+
+    if (!key) {
+      return res.status(404).json({ error: `Asset type '${type}' not found for this job` });
+    }
+
+    // Generate presigned GET URL
+    const url = await s3.getPresignedGetUrl(key);
+
+    res.json({ url, key });
+
+  } catch (error) {
+    console.error('[Presign GET] Error:', error);
+    res.status(500).json({ error: 'Failed to generate presigned URL', details: error.message });
+  }
+});
+
+// =============================================================================
+// POST /jobs/:id/presign - Generate presigned URLs for specific keys (Body params)
 // =============================================================================
 router.post('/jobs/:id/presign', async (req, res) => {
   try {
@@ -262,7 +317,7 @@ router.post('/jobs/:id/presign', async (req, res) => {
     res.json(presignedUrls);
 
   } catch (error) {
-    console.error('[Presign] Error:', error);
+    console.error('[Presign POST] Error:', error);
     res.status(500).json({ error: 'Failed to generate presigned URLs', details: error.message });
   }
 });
