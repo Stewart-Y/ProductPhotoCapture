@@ -204,9 +204,9 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'backgrounds' && (
             <div className="space-y-4">
-              {job.s3_bg_keys ? (
+              {job.s3_bg_keys && Array.isArray(job.s3_bg_keys) ? (
                 <div className="grid grid-cols-2 gap-4">
-                  {JSON.parse(job.s3_bg_keys).map((key: string, i: number) => (
+                  {job.s3_bg_keys.map((key: string, i: number) => (
                     <div key={i}>
                       <p className="text-xs font-semibold text-muted-foreground mb-2">Background {i + 1}</p>
                       <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
@@ -223,9 +223,9 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'composites' && (
             <div className="space-y-4">
-              {job.s3_composite_keys ? (
+              {job.s3_composite_keys && Array.isArray(job.s3_composite_keys) ? (
                 <div className="grid grid-cols-2 gap-4">
-                  {JSON.parse(job.s3_composite_keys).map((key: string, i: number) => (
+                  {job.s3_composite_keys.map((key: string, i: number) => (
                     <div key={i}>
                       <p className="text-xs font-semibold text-muted-foreground mb-2">Composite {i + 1}</p>
                       <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
@@ -242,9 +242,9 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'derivatives' && (
             <div className="space-y-4">
-              {job.s3_derivative_keys ? (
+              {job.s3_derivative_keys && Array.isArray(job.s3_derivative_keys) ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {JSON.parse(job.s3_derivative_keys).map((key: string, i: number) => (
+                  {job.s3_derivative_keys.map((key: string, i: number) => (
                     <div key={i} className="text-xs">
                       <div className="bg-muted rounded p-2 min-h-[80px] flex items-center justify-center">
                         <p className="text-muted-foreground text-center break-words">{key.split('/').pop()}</p>
