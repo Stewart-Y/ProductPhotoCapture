@@ -19,7 +19,7 @@ export const JobDetail: React.FC = () => {
   const failJobMutation = useFailJob();
 
   const job = jobData?.job;
-  const currentStepIndex = job ? STEPS.indexOf(job.status as any) : -1;
+  const currentStepIndex = job && job.status ? STEPS.indexOf(job.status as any) : -1;
 
   const handleCopyField = (field: string, value: string | null) => {
     if (value) {
@@ -30,7 +30,7 @@ export const JobDetail: React.FC = () => {
   };
 
   const handleFail = () => {
-    if (job && failReason) {
+    if (job && job.id && failReason) {
       failJobMutation.mutate({ id: job.id, reason: failReason });
       setShowFailDialog(false);
       setFailReason('');
@@ -45,27 +45,54 @@ export const JobDetail: React.FC = () => {
     return <div className="p-6">Job not found</div>;
   }
 
+  // Ensure job has required properties
+  const safeJob = {
+    id: job.id || '',
+    sku: job.sku || '',
+    status: job.status || 'UNKNOWN',
+    theme: job.theme || '',
+    source_url: job.source_url || null,
+    s3_cutout_key: job.s3_cutout_key || null,
+    s3_mask_key: job.s3_mask_key || null,
+    s3_bg_keys: job.s3_bg_keys || null,
+    s3_composite_keys: job.s3_composite_keys || null,
+    s3_derivative_keys: job.s3_derivative_keys || null,
+    cost_usd: job.cost_usd || 0,
+    created_at: job.created_at || '',
+    completed_at: job.completed_at || null,
+    attempt: job.attempt || 0,
+    error_code: job.error_code || null,
+    error_message: job.error_message || null,
+    download_ms: job.download_ms || null,
+    segmentation_ms: job.segmentation_ms || null,
+    backgrounds_ms: job.backgrounds_ms || null,
+    compositing_ms: job.compositing_ms || null,
+    derivatives_ms: job.derivatives_ms || null,
+    manifest_ms: job.manifest_ms || null,
+    img_sha256: job.img_sha256 || '',
+  };
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold">{job.sku}</h1>
+          <h1 className="text-3xl font-bold">{safeJob.sku}</h1>
           <p className="text-muted-foreground mt-1">
-            Job ID: <span className="font-mono">{job.id}</span>
+            Job ID: <span className="font-mono">{safeJob.id}</span>
           </p>
         </div>
         <div className="flex gap-2">
-          {job.status === 'FAILED' && (
+          {safeJob.status === 'FAILED' && (
             <Button
               variant="outline"
-              onClick={() => retryJob.mutate(job.id)}
+              onClick={() => retryJob.mutate(safeJob.id)}
               disabled={retryJob.isPending}
             >
               Retry
             </Button>
           )}
-          {job.status !== 'DONE' && job.status !== 'FAILED' && (
+          {safeJob.status !== 'DONE' && safeJob.status !== 'FAILED' && (
             <Button
               variant="destructive"
               onClick={() => setShowFailDialog(true)}
@@ -200,13 +227,13 @@ export const JobDetail: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'cutout' && <CutoutMaskTab jobId={job.id} job={job} />}
+          {activeTab === 'cutout' && <CutoutMaskTab jobId={safeJob.id} job={safeJob} />}
 
           {activeTab === 'backgrounds' && (
             <div className="space-y-4">
-              {job.s3_bg_keys && Array.isArray(job.s3_bg_keys) ? (
+              {safeJob.s3_bg_keys && Array.isArray(safeJob.s3_bg_keys) ? (
                 <div className="grid grid-cols-2 gap-4">
-                  {job.s3_bg_keys.map((key: string, i: number) => (
+                  {safeJob.s3_bg_keys.map((key: string, i: number) => (
                     <div key={i}>
                       <p className="text-xs font-semibold text-muted-foreground mb-2">Background {i + 1}</p>
                       <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
@@ -223,9 +250,9 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'composites' && (
             <div className="space-y-4">
-              {job.s3_composite_keys && Array.isArray(job.s3_composite_keys) ? (
+              {safeJob.s3_composite_keys && Array.isArray(safeJob.s3_composite_keys) ? (
                 <div className="grid grid-cols-2 gap-4">
-                  {job.s3_composite_keys.map((key: string, i: number) => (
+                  {safeJob.s3_composite_keys.map((key: string, i: number) => (
                     <div key={i}>
                       <p className="text-xs font-semibold text-muted-foreground mb-2">Composite {i + 1}</p>
                       <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
@@ -242,9 +269,9 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'derivatives' && (
             <div className="space-y-4">
-              {job.s3_derivative_keys && Array.isArray(job.s3_derivative_keys) ? (
+              {safeJob.s3_derivative_keys && Array.isArray(safeJob.s3_derivative_keys) ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {job.s3_derivative_keys.map((key: string, i: number) => (
+                  {safeJob.s3_derivative_keys.map((key: string, i: number) => (
                     <div key={i} className="text-xs">
                       <div className="bg-muted rounded p-2 min-h-[80px] flex items-center justify-center">
                         <p className="text-muted-foreground text-center break-words">{key.split('/').pop()}</p>
@@ -591,6 +618,10 @@ interface CutoutMaskTabProps {
 const CutoutMaskTab: React.FC<CutoutMaskTabProps> = ({ jobId, job }) => {
   const { data: cutoutData, isLoading: cutoutLoading } = usePresignedUrl(jobId, 'cutout');
   const { data: maskData, isLoading: maskLoading } = usePresignedUrl(jobId, 'mask');
+
+  if (!job) {
+    return <p className="text-muted-foreground text-center py-8">Job data unavailable</p>;
+  }
 
   if (cutoutLoading || maskLoading) {
     return <div className="text-center py-8 text-muted-foreground">Loading images...</div>;
