@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useJob, useRetryJob, useFailJob } from '../hooks';
 import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Input } from '../components/ui';
 import { formatCurrency, formatDuration, formatRelativeTime } from '../lib/utils';
-import { AlertCircle, Copy, Check } from 'lucide-react';
+import { AlertCircle, Copy, Check, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
 
 const STEPS = ['NEW', 'BG_REMOVED', 'BACKGROUND_READY', 'COMPOSITED', 'DERIVATIVES', 'SHOPIFY_PUSH', 'DONE'];
 
@@ -12,6 +12,7 @@ export const JobDetail: React.FC = () => {
   const [copied, setCopied] = useState<string | null>(null);
   const [failReason, setFailReason] = useState('');
   const [showFailDialog, setShowFailDialog] = useState(false);
+  const [activeTab, setActiveTab] = useState<'original' | 'cutout' | 'backgrounds' | 'composites' | 'derivatives'>('original');
 
   const { data: jobData, isLoading } = useJob(id);
   const retryJob = useRetryJob();
@@ -100,6 +101,186 @@ export const JobDetail: React.FC = () => {
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Image Transformation Viewer */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="w-5 h-5" />
+              <CardTitle>Image Transformation Pipeline</CardTitle>
+            </div>
+          </div>
+          {/* Tabs */}
+          <div className="flex gap-2 mt-4 border-b">
+            <button
+              onClick={() => setActiveTab('original')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'original'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              📥 Original
+            </button>
+            <button
+              onClick={() => setActiveTab('cutout')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'cutout'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              ✂️ Cutout & Mask
+            </button>
+            <button
+              onClick={() => setActiveTab('backgrounds')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'backgrounds'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              🎨 Backgrounds (2)
+            </button>
+            <button
+              onClick={() => setActiveTab('composites')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'composites'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              🖼️ Composites (2)
+            </button>
+            <button
+              onClick={() => setActiveTab('derivatives')}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'derivatives'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              📐 Derivatives (18)
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {activeTab === 'original' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Original image from 3JMS</p>
+              {job.source_url ? (
+                <div className="space-y-4">
+                  <div className="bg-muted rounded-lg p-4 flex items-center justify-center min-h-[300px]">
+                    <img
+                      src={job.source_url}
+                      alt="Original"
+                      className="max-h-96 max-w-full object-contain rounded"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                      }}
+                    />
+                    <div className="hidden text-muted-foreground">Image failed to load</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <a href={job.source_url} target="_blank" rel="noopener noreferrer" className="flex-1">
+                      <Button variant="outline" className="w-full" size="sm">
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Open in New Tab
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">No source image URL available</p>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'cutout' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {job.s3_cutout_key && (
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground mb-2">Cutout (Transparent)</p>
+                    <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
+                      <p className="text-xs text-muted-foreground">S3 Asset: {job.s3_cutout_key.split('/').pop()}</p>
+                    </div>
+                  </div>
+                )}
+                {job.s3_mask_key && (
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground mb-2">Mask (Binary)</p>
+                    <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
+                      <p className="text-xs text-muted-foreground">S3 Asset: {job.s3_mask_key.split('/').pop()}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {(!job.s3_cutout_key && !job.s3_mask_key) && (
+                <p className="text-muted-foreground text-center py-8">Cutout assets not yet generated</p>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'backgrounds' && (
+            <div className="space-y-4">
+              {job.s3_bg_keys ? (
+                <div className="grid grid-cols-2 gap-4">
+                  {JSON.parse(job.s3_bg_keys).map((key: string, i: number) => (
+                    <div key={i}>
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Background {i + 1}</p>
+                      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
+                        <p className="text-xs text-muted-foreground">{key.split('/').pop()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">Backgrounds not yet generated</p>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'composites' && (
+            <div className="space-y-4">
+              {job.s3_composite_keys ? (
+                <div className="grid grid-cols-2 gap-4">
+                  {JSON.parse(job.s3_composite_keys).map((key: string, i: number) => (
+                    <div key={i}>
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Composite {i + 1}</p>
+                      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
+                        <p className="text-xs text-muted-foreground">{key.split('/').pop()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">Composites not yet generated</p>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'derivatives' && (
+            <div className="space-y-4">
+              {job.s3_derivative_keys ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {JSON.parse(job.s3_derivative_keys).map((key: string, i: number) => (
+                    <div key={i} className="text-xs">
+                      <div className="bg-muted rounded p-2 min-h-[80px] flex items-center justify-center">
+                        <p className="text-muted-foreground text-center break-words">{key.split('/').pop()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">Derivatives not yet generated</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
