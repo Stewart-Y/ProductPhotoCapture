@@ -323,6 +323,28 @@ router.post('/jobs/:id/presign', async (req, res) => {
 });
 
 // =============================================================================
+// GET /s3/presign - Generate presigned GET URL for any S3 key (Query params)
+// =============================================================================
+router.get('/s3/presign', async (req, res) => {
+  try {
+    const { key } = req.query;
+
+    if (!key) {
+      return res.status(400).json({ error: 'Missing required parameter: key' });
+    }
+
+    // Generate presigned GET URL for the specified key
+    const url = await s3.getPresignedGetUrl(key);
+
+    res.json({ url, key });
+
+  } catch (error) {
+    console.error('[S3 Presign] Error:', error);
+    res.status(500).json({ error: 'Failed to generate presigned URL', details: error.message });
+  }
+});
+
+// =============================================================================
 // POST /jobs/:id/segmentation - Update with segmentation results
 // =============================================================================
 router.post('/jobs/:id/segmentation', async (req, res) => {

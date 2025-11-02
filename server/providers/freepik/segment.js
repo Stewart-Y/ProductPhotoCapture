@@ -29,8 +29,13 @@ export class FreepikSegmentProvider extends BaseProvider {
     this.log('info', 'Starting background removal', { sku, sha256 });
 
     try {
-      // Step 1: Call Freepik API
-      const freepikResult = await this.callFreepikAPI(imageUrl);
+      // Step 0: Download image from URL first (to handle S3 presigned URLs and CORS issues)
+      // Freepik API may have trouble accessing S3 presigned URLs
+      this.log('info', 'Downloading image from source URL', { imageUrl });
+      const imageBuffer = await this.downloadImage(imageUrl);
+
+      // Step 1: Call Freepik API with the actual image buffer
+      const freepikResult = await this.callFreepikAPIWithBuffer(imageBuffer);
 
       if (!freepikResult.success) {
         return {
@@ -136,6 +141,59 @@ export class FreepikSegmentProvider extends BaseProvider {
   /**
    * Call Freepik remove-background API
    */
+  /**
+   * Call Freepik API with image buffer (multipart form data)
+   * This works better for S3 presigned URLs and avoids CORS issues
+   * Uses native Node.js FormData (v18.12.0+) - no external dependency needed
+   */
+  async callFreepikAPIWithBuffer(imageBuffer) {
+    try {
+      const form = new FormData();
+      // Create a Blob from the buffer for FormData
+      // NOTE: Freepik API expects field name 'image_file' (not 'image')
+      const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      form.append('image_file', blob, 'image.jpg');
+
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'x-freepik-api-key': this.apiKey
+        },
+        body: form
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Freepik API error (${response.status}): ${errorText}`);
+      }
+
+      const result = await response.json();
+
+      this.log('debug', 'Freepik API response', { result });
+
+      if (!result.url) {
+        throw new Error(`Invalid response from Freepik API: ${JSON.stringify(result)}`);
+      }
+
+      return {
+        success: true,
+        url: result.url,
+        highRes: result.high_resolution,
+        preview: result.preview,
+        original: result.original,
+        width: null,
+        height: null
+      };
+
+    } catch (error) {
+      this.log('error', 'Freepik API call failed', { error: error.message });
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   async callFreepikAPI(imageUrl) {
     try {
       // Freepik expects application/x-www-form-urlencoded
@@ -270,6 +328,7 @@ export class FreepikSegmentProvider extends BaseProvider {
       });
     }
   }
+
 }
 
 export default FreepikSegmentProvider;

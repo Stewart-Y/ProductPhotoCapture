@@ -229,24 +229,7 @@ export const JobDetail: React.FC = () => {
 
           {activeTab === 'cutout' && <CutoutMaskTab jobId={safeJob.id} job={safeJob} />}
 
-          {activeTab === 'backgrounds' && (
-            <div className="space-y-4">
-              {safeJob.s3_bg_keys && Array.isArray(safeJob.s3_bg_keys) ? (
-                <div className="grid grid-cols-2 gap-4">
-                  {safeJob.s3_bg_keys.map((key: string, i: number) => (
-                    <div key={i}>
-                      <p className="text-xs font-semibold text-muted-foreground mb-2">Background {i + 1}</p>
-                      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
-                        <p className="text-xs text-muted-foreground">{key.split('/').pop()}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">Backgrounds not yet generated</p>
-              )}
-            </div>
-          )}
+          {activeTab === 'backgrounds' && <BackgroundsTab jobId={safeJob.id} job={safeJob} />}
 
           {activeTab === 'composites' && (
             <div className="space-y-4">
@@ -681,6 +664,88 @@ const CutoutMaskTab: React.FC<CutoutMaskTabProps> = ({ jobId, job }) => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+/**
+ * Backgrounds Tab Component
+ * Displays generated background images with presigned URLs
+ */
+interface BackgroundsTabProps {
+  jobId: string;
+  job: any;
+}
+
+const BackgroundsTab: React.FC<BackgroundsTabProps> = ({ jobId, job }) => {
+  if (!job || !job.s3_bg_keys || !Array.isArray(job.s3_bg_keys)) {
+    return <p className="text-muted-foreground text-center py-8">Backgrounds not yet generated</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        {job.s3_bg_keys.map((key: string, i: number) => (
+          <BackgroundImage key={i} s3Key={key} index={i + 1} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Individual Background Image Component
+ * Fetches presigned URL for a specific S3 key
+ */
+interface BackgroundImageProps {
+  s3Key: string;
+  index: number;
+}
+
+const BackgroundImage: React.FC<BackgroundImageProps> = ({ s3Key, index }) => {
+  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(false);
+
+  React.useEffect(() => {
+    const fetchPresignedUrl = async () => {
+      try {
+        setLoading(true);
+        setError(false);
+
+        // Call backend to get presigned URL for this specific S3 key
+        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        if (!response.ok) throw new Error('Failed to fetch presigned URL');
+
+        const data = await response.json();
+        setImageUrl(data.url);
+      } catch (err) {
+        console.error('Error fetching presigned URL:', err);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPresignedUrl();
+  }, [s3Key]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground mb-2">Background {index}</p>
+      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center overflow-hidden">
+        {loading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {error && <p className="text-xs text-red-500">Failed to load image</p>}
+        {!loading && !error && imageUrl && (
+          <img
+            src={imageUrl}
+            alt={`Background ${index}`}
+            className="max-h-full max-w-full object-contain rounded"
+            onError={() => setError(true)}
+          />
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground mt-2 break-all">{s3Key}</p>
     </div>
   );
 };

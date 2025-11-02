@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useDashboardStats, useJobs, useProcessorStatus } from '../hooks';
 import { StatCard } from '../components/StatCard';
 import { Card, CardContent, CardHeader, CardTitle, Button, StatusBadge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui';
 import { formatCurrency, formatDuration, formatRelativeTime } from '../lib/utils';
-import { Activity, TrendingUp, AlertCircle, Zap } from 'lucide-react';
+import { Activity, TrendingUp, AlertCircle, Zap, Upload } from 'lucide-react';
+import TestUploadModal from '../components/TestUploadModal';
 
 export const Dashboard: React.FC = () => {
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: jobsData, isLoading: jobsLoading } = useJobs({ limit: 10, status: 'FAILED' });
   const { data: processorStatus, isLoading: processorLoading } = useProcessorStatus();
@@ -18,11 +20,20 @@ export const Dashboard: React.FC = () => {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Executive overview of your pipeline</p>
         </div>
-        <div className="text-right">
-          <p className="text-sm text-muted-foreground">Processor Status</p>
-          <p className="text-lg font-semibold">
-            {processorLoading ? '...' : processorStatus?.isRunning ? '🟢 Running' : '🔴 Stopped'}
-          </p>
+        <div className="flex items-center gap-4">
+          <Button
+            onClick={() => setUploadModalOpen(true)}
+            className="gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            Test Upload
+          </Button>
+          <div className="text-right">
+            <p className="text-sm text-muted-foreground">Processor Status</p>
+            <p className="text-lg font-semibold">
+              {processorLoading ? '...' : processorStatus?.isRunning ? '🟢 Running' : '🔴 Stopped'}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -138,6 +149,16 @@ export const Dashboard: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Test Upload Modal */}
+      <TestUploadModal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onSuccess={(jobId) => {
+          // Redirect to job detail page
+          window.location.href = `/jobs/${jobId}`;
+        }}
+      />
     </div>
   );
 };
