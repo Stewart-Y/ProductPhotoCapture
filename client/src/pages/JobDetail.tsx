@@ -493,7 +493,7 @@ export const JobDetail: React.FC = () => {
               <div>
                 <p className="text-xs text-muted-foreground font-semibold uppercase mb-2">Backgrounds</p>
                 <div className="space-y-1">
-                  {JSON.parse(job.s3_bg_keys).map((key: string, i: number) => (
+                  {(Array.isArray(job.s3_bg_keys) ? job.s3_bg_keys : JSON.parse(job.s3_bg_keys || '[]')).map((key: string, i: number) => (
                     <div key={i} className="flex items-start gap-2">
                       <button
                         onClick={() => handleCopyField(`bg-${i}`, key)}
@@ -519,7 +519,7 @@ export const JobDetail: React.FC = () => {
               <div>
                 <p className="text-xs text-muted-foreground font-semibold uppercase mb-2">Composites</p>
                 <div className="space-y-1">
-                  {JSON.parse(job.s3_composite_keys).map((key: string, i: number) => (
+                  {(Array.isArray(job.s3_composite_keys) ? job.s3_composite_keys : JSON.parse(job.s3_composite_keys || '[]')).map((key: string, i: number) => (
                     <div key={i} className="flex items-start gap-2">
                       <button
                         onClick={() => handleCopyField(`composite-${i}`, key)}
