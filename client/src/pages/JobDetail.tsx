@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useJob, useRetryJob, useFailJob, usePresignedUrl } from '../hooks';
 import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Input } from '../components/ui';
@@ -703,11 +703,11 @@ interface BackgroundImageProps {
 }
 
 const BackgroundImage: React.FC<BackgroundImageProps> = ({ s3Key, index }) => {
-  const [imageUrl, setImageUrl] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const fetchPresignedUrl = async () => {
       try {
         setLoading(true);
