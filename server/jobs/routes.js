@@ -7,6 +7,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
+import multer from 'multer';
 import db from '../db.js';
 import {
   createJob,
@@ -27,6 +28,11 @@ import { getProcessorStatus, getProcessorConfig } from '../workflows/processor.j
 
 const router = express.Router();
 const s3 = getS3Storage();
+
+// Multer middleware for file uploads
+const upload = multer({
+  limits: { fileSize: 10 * 1024 * 1024 }  // 10MB limit
+});
 
 // =============================================================================
 // POST /webhooks/3jms/images - Receive 3JMS webhook (idempotent job creation)
@@ -201,7 +207,7 @@ router.get('/jobs/:id', (req, res) => {
       shopify_media_ids: job.shopify_media_ids ? JSON.parse(job.shopify_media_ids) : null
     };
 
-    res.json(response);
+    res.json({ job: response });
 
   } catch (error) {
     console.error('[Job Get] Error:', error);
@@ -585,6 +591,38 @@ router.get('/processor/config', (req, res) => {
   } catch (error) {
     console.error('[Processor Config] Error:', error);
     res.status(500).json({ error: 'Failed to get processor config', details: error.message });
+  }
+});
+
+// =============================================================================
+// POST /upload-test-image - Upload test image for webhook testing
+// =============================================================================
+router.post('/upload-test-image', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Upload to S3 under test-uploads folder
+    const testKey = `test-uploads/${Date.now()}-${req.file.originalname}`;
+
+    await s3.upload(testKey, req.file.buffer, req.file.mimetype);
+
+    // Get presigned URL that's valid for 1 hour
+    const url = await s3.getPresignedGetUrl(testKey, 3600);
+
+    console.log(`[TestUpload] ✅ Uploaded test image: ${testKey}`);
+
+    res.status(201).json({
+      url: url,
+      key: testKey,
+      filename: req.file.originalname,
+      size: req.file.size
+    });
+
+  } catch (error) {
+    console.error('[TestUpload] Error:', error);
+    res.status(500).json({ error: 'Failed to upload test image', details: error.message });
   }
 });
 
