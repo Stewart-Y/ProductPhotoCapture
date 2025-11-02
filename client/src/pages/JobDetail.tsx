@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useJob, useRetryJob, useFailJob } from '../hooks';
+import { useJob, useRetryJob, useFailJob, usePresignedUrl } from '../hooks';
 import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Input } from '../components/ui';
 import { formatCurrency, formatDuration, formatRelativeTime } from '../lib/utils';
 import { AlertCircle, Copy, Check, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
@@ -200,31 +200,7 @@ export const JobDetail: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'cutout' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                {job.s3_cutout_key && (
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground mb-2">Cutout (Transparent)</p>
-                    <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
-                      <p className="text-xs text-muted-foreground">S3 Asset: {job.s3_cutout_key.split('/').pop()}</p>
-                    </div>
-                  </div>
-                )}
-                {job.s3_mask_key && (
-                  <div>
-                    <p className="text-xs font-semibold text-muted-foreground mb-2">Mask (Binary)</p>
-                    <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
-                      <p className="text-xs text-muted-foreground">S3 Asset: {job.s3_mask_key.split('/').pop()}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {(!job.s3_cutout_key && !job.s3_mask_key) && (
-                <p className="text-muted-foreground text-center py-8">Cutout assets not yet generated</p>
-              )}
-            </div>
-          )}
+          {activeTab === 'cutout' && <CutoutMaskTab jobId={job.id} job={job} />}
 
           {activeTab === 'backgrounds' && (
             <div className="space-y-4">
@@ -599,6 +575,81 @@ export const JobDetail: React.FC = () => {
           </Card>
         </div>
       )}
+    </div>
+  );
+};
+
+/**
+ * Cutout & Mask Tab Component
+ * Displays cutout and mask images with presigned URLs
+ */
+interface CutoutMaskTabProps {
+  jobId: string;
+  job: any;
+}
+
+const CutoutMaskTab: React.FC<CutoutMaskTabProps> = ({ jobId, job }) => {
+  const { data: cutoutData, isLoading: cutoutLoading } = usePresignedUrl(jobId, 'cutout');
+  const { data: maskData, isLoading: maskLoading } = usePresignedUrl(jobId, 'mask');
+
+  if (cutoutLoading || maskLoading) {
+    return <div className="text-center py-8 text-muted-foreground">Loading images...</div>;
+  }
+
+  if (!job.s3_cutout_key && !job.s3_mask_key) {
+    return <p className="text-muted-foreground text-center py-8">Cutout assets not yet generated</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        {job.s3_cutout_key && cutoutData?.url && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Cutout (Transparent)</p>
+            <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center overflow-hidden">
+              <img
+                src={cutoutData.url}
+                alt="Cutout"
+                className="max-h-full max-w-full object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const parent = (e.target as HTMLImageElement).parentElement;
+                  if (parent) {
+                    const error = document.createElement('p');
+                    error.className = 'text-xs text-muted-foreground';
+                    error.textContent = 'Failed to load image';
+                    parent.appendChild(error);
+                  }
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 break-all">{job.s3_cutout_key}</p>
+          </div>
+        )}
+        {job.s3_mask_key && maskData?.url && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Mask (Binary)</p>
+            <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center overflow-hidden">
+              <img
+                src={maskData.url}
+                alt="Mask"
+                className="max-h-full max-w-full object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const parent = (e.target as HTMLImageElement).parentElement;
+                  if (parent) {
+                    const error = document.createElement('p');
+                    error.className = 'text-xs text-muted-foreground';
+                    error.textContent = 'Failed to load image';
+                    parent.appendChild(error);
+                  }
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 break-all">{job.s3_mask_key}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
