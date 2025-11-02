@@ -22,7 +22,8 @@
         250,
         300
       ],
-      "webhookId": "webhook_3jms_images"
+      "webhookId": "webhook_3jms_images",
+      "disabled": false
     },
     {
       "parameters": {
@@ -59,7 +60,8 @@
       "position": [
         500,
         300
-      ]
+      ],
+      "disabled": false
     },
     {
       "parameters": {
@@ -73,7 +75,8 @@
       "position": [
         750,
         300
-      ]
+      ],
+      "disabled": false
     }
   ],
   "connections": {
