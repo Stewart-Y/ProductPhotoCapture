@@ -19,7 +19,7 @@ export class FreepikCompositeProvider {
     }
 
     this.apiKey = apiKey;
-    this.apiUrl = 'https://api.freepik.com/v1/ai/seedream-v4-edit';
+    this.apiUrl = 'https://api.freepik.com/v1/ai/text-to-image/seedream-v4-edit';
   }
 
   /**
