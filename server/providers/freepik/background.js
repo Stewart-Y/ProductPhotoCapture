@@ -23,13 +23,19 @@ export class FreepikBackgroundProvider extends BaseProvider {
   /**
    * Generate themed background image
    */
-  async generateBackground({ theme, sku, sha256, dimensions, aspectRatio }) {
+  async generateBackground({ theme, sku, sha256, dimensions, aspectRatio, customPrompt, variant = 1 }) {
     const startTime = Date.now();
-    this.log('info', 'Starting background generation', { theme, sku, sha256 });
+    this.log('info', 'Starting background generation', { theme, sku, sha256, variant, customPrompt });
 
     try {
-      // Step 1: Build prompt from theme
-      const prompt = this.getThemePrompt(theme);
+      // Step 1: Build prompt from theme or use custom prompt
+      let prompt;
+      if (customPrompt) {
+        // Enhance user's custom prompt to ensure background-only generation
+        prompt = this.enhanceCustomPrompt(customPrompt);
+      } else {
+        prompt = this.getThemePrompt(theme);
+      }
 
       // Step 2: Determine resolution and aspect ratio
       const resolution = this.selectResolution(dimensions);
@@ -39,15 +45,28 @@ export class FreepikBackgroundProvider extends BaseProvider {
         theme,
         prompt: prompt.substring(0, 100) + '...',
         resolution,
-        aspectRatio: aspect
+        aspectRatio: aspect,
+        customPrompt: !!customPrompt
       });
 
-      // Step 3: Call Freepik API
-      const freepikResult = await this.callFreepikAPI({
+      // Step 3: Submit generation request (async)
+      const submissionResult = await this.submitGenerationRequest({
         prompt,
         resolution,
         aspectRatio: aspect
       });
+
+      if (!submissionResult.success) {
+        return {
+          success: false,
+          error: submissionResult.error,
+          provider: this.name,
+          cost: 0
+        };
+      }
+
+      // Step 4: Poll for completion
+      const freepikResult = await this.pollForCompletion(submissionResult.taskId);
 
       if (!freepikResult.success) {
         return {
@@ -68,9 +87,9 @@ export class FreepikBackgroundProvider extends BaseProvider {
 
       // Step 5: Upload to S3 with deterministic key
       const storage = getStorage();
-      const s3Key = storage.getBackgroundKey(sku, sha256, theme);
+      const s3Key = storage.getBackgroundKey(sku, sha256, theme, variant);
 
-      this.log('info', 'Uploading to S3', { s3Key, size: imageBuffer.length });
+      this.log('info', 'Uploading to S3', { s3Key, variant, size: imageBuffer.length });
 
       await storage.uploadBuffer(s3Key, imageBuffer, 'image/jpeg');
 
@@ -125,23 +144,23 @@ export class FreepikBackgroundProvider extends BaseProvider {
   }
 
   /**
-   * Call Freepik Mystic API
+   * Submit generation request to Freepik Mystic API (async, returns task_id)
    */
-  async callFreepikAPI({ prompt, resolution, aspectRatio }) {
+  async submitGenerationRequest({ prompt, resolution, aspectRatio }) {
     try {
       const payload = {
         prompt,
         resolution, // '2k' or '4k'
         aspect_ratio: aspectRatio, // e.g., 'square_1_1', 'widescreen_16_9'
-        model: 'realism', // Options: fluid, realism, zen, flexible, super_real, editorial_portraits
+        model: 'zen', // CHANGED: zen model generates fewer objects (was 'realism')
         engine: 'magnific_illusio', // Options: automatic, magnific_illusio, magnific_sharpy, magnific_sparkle
-        creative_detailing: 5, // 0-10 scale, 5 is balanced
+        creative_detailing: 33, // FIXED: API uses 0-100 scale, not 0-10 (was 5)
         guidance_scale: 7.5, // How closely to follow prompt
         num_inference_steps: 50, // Quality vs speed tradeoff
         seed: null // Random seed for reproducibility (null = random)
       };
 
-      this.log('debug', 'Calling Freepik Mystic API', { payload });
+      this.log('debug', 'Submitting generation request to Freepik Mystic API', { payload });
 
       const response = await fetch(this.apiUrl, {
         method: 'POST',
@@ -159,43 +178,132 @@ export class FreepikBackgroundProvider extends BaseProvider {
 
       const result = await response.json();
 
-      // Debug: log the actual response structure
-      this.log('debug', 'Freepik API response', { result });
+      this.log('debug', 'Freepik API submission response', { result });
 
-      // Response format might be:
-      // Option 1: { data: { url: "...", id: "..." } }
-      // Option 2: { url: "...", id: "..." }
-      // Option 3: { image: { url: "..." } }
+      // Expected format: { data: { task_id: "...", status: "CREATED", generated: [] } }
+      const data = result.data || result;
+      const taskId = data.task_id || data.id;
 
-      let imageUrl;
-      let imageId;
-
-      if (result.data && result.data.url) {
-        imageUrl = result.data.url;
-        imageId = result.data.id;
-      } else if (result.url) {
-        imageUrl = result.url;
-        imageId = result.id;
-      } else if (result.image && result.image.url) {
-        imageUrl = result.image.url;
-        imageId = result.image.id || result.id;
-      } else {
-        throw new Error(`Invalid response from Freepik API: ${JSON.stringify(result)}`);
+      if (!taskId) {
+        throw new Error(`No task_id in response: ${JSON.stringify(result)}`);
       }
 
       return {
         success: true,
-        url: imageUrl,
-        id: imageId
+        taskId,
+        status: data.status
       };
 
     } catch (error) {
-      this.log('error', 'Freepik API call failed', { error: error.message });
+      this.log('error', 'Freepik API submission failed', { error: error.message });
       return {
         success: false,
         error: error.message
       };
     }
+  }
+
+  /**
+   * Poll for generation completion with exponential backoff
+   */
+  async pollForCompletion(taskId) {
+    const maxAttempts = 40; // ~2 minutes max
+    const initialInterval = 2000; // Start with 2 seconds
+    const maxInterval = 10000; // Cap at 10 seconds
+    const backoffMultiplier = 1.5;
+
+    let attempts = 0;
+    let pollInterval = initialInterval;
+
+    this.log('info', 'Starting polling for task completion', { taskId, maxAttempts });
+
+    while (attempts < maxAttempts) {
+      attempts++;
+
+      try {
+        const pollUrl = `${this.apiUrl}/${taskId}`;
+        const response = await fetch(pollUrl, {
+          method: 'GET',
+          headers: {
+            'x-freepik-api-key': this.apiKey
+          }
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Poll failed (${response.status}): ${errorText}`);
+        }
+
+        const result = await response.json();
+        const data = result.data || result;
+        const status = (data.status || '').toUpperCase();
+
+        this.log('debug', `Poll attempt ${attempts}/${maxAttempts}`, { status });
+
+        // Check for completion
+        if (status === 'COMPLETED' || status === 'DONE' || status === 'SUCCESS' || status === 'FINISHED') {
+          // Extract URL from generated array
+          let imageUrl = null;
+          if (data.generated && Array.isArray(data.generated) && data.generated.length > 0) {
+            imageUrl = data.generated[0].url || data.generated[0];
+          } else if (data.url) {
+            imageUrl = data.url;
+          }
+
+          if (!imageUrl) {
+            throw new Error(`Generation completed but no URL found: ${JSON.stringify(result)}`);
+          }
+
+          this.log('info', 'Generation completed successfully', {
+            attempts,
+            duration: `~${attempts * (pollInterval / 1000)}s`,
+            url: imageUrl.substring(0, 80) + '...'
+          });
+
+          return {
+            success: true,
+            url: imageUrl
+          };
+        }
+
+        // Check for failure
+        if (status === 'FAILED' || status === 'ERROR') {
+          throw new Error(`Generation failed with status: ${status}`);
+        }
+
+        // Still in progress, wait before next poll
+        if (attempts < maxAttempts) {
+          await this.sleep(pollInterval);
+          // Exponential backoff
+          pollInterval = Math.min(pollInterval * backoffMultiplier, maxInterval);
+        }
+
+      } catch (error) {
+        this.log('error', 'Poll attempt failed', { attempt: attempts, error: error.message });
+        // Don't throw immediately, let it retry
+        if (attempts >= maxAttempts) {
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+        await this.sleep(pollInterval);
+      }
+    }
+
+    // Max attempts reached
+    this.log('error', 'Max polling attempts reached', { taskId, maxAttempts });
+    return {
+      success: false,
+      error: `Polling timeout after ${maxAttempts} attempts`
+    };
+  }
+
+  /**
+   * Sleep helper for polling
+   */
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -292,36 +400,60 @@ export class FreepikBackgroundProvider extends BaseProvider {
   }
 
   /**
-   * Enhanced theme prompts with negative prompts
+   * Enhance custom prompt to ensure background-only generation (no products)
+   * IMPORTANT: Freepik Mystic API does NOT support negative prompts
+   * Use ONLY positive descriptions of what you WANT, not what you DON'T want
+   */
+  enhanceCustomPrompt(userPrompt) {
+    // Remove any mentions of "bottle" or "product" from user's prompt
+    const cleanedPrompt = userPrompt
+      .replace(/leave the bottle as it is,?\s*/gi, '')
+      .replace(/bottle,?\s*/gi, '')
+      .replace(/product,?\s*/gi, '')
+      .replace(/let the background be/gi, '')
+      .replace(/dont?\s+generate\s+items?,?\s*/gi, '')
+      .replace(/dont?\s+generate\s+objects?,?\s*/gi, '')
+      .replace(/no\s+objects?,?\s*/gi, '')
+      .replace(/no\s+products?,?\s*/gi, '')
+      .replace(/just\s+background,?\s*/gi, '')
+      .replace(/and\s+/gi, ' ')
+      .trim();
+
+    // Build enhanced prompt using ONLY positive language
+    // Focus on describing empty spaces and background elements at periphery
+    return `Product photography background scene with ${cleanedPrompt} theme. Empty center foreground with vacant placement space, clear unoccupied surface in sharp focus. Background scenic elements pushed to edges and periphery, blurred background depth, shallow depth of field. Professional studio photography setup, commercial quality, photorealistic rendering, cinematic lighting with key and fill lights creating empty foreground area ready for product placement.`;
+  }
+
+  /**
+   * Theme prompts with POSITIVE-ONLY language
+   * Freepik Mystic API does NOT support negative prompts
    */
   getThemePrompt(theme) {
     const prompts = {
       default: {
-        positive: 'Professional product photography background, clean and modern aesthetic, soft gradient from light to slightly darker tone, studio lighting setup with key light and fill light, high quality commercial photography, photorealistic rendering, subtle texture, depth of field',
-        negative: 'busy, cluttered, distracting elements, text, watermarks, people, hands, faces'
+        positive: 'Professional product photography empty background scene, vacant center foreground space ready for placement, soft gradient backdrop fading from light to slightly darker tone, clean smooth surface in sharp focus. Studio lighting setup with key and fill lights illuminating empty foreground area, high quality commercial photography, photorealistic rendering, subtle texture, depth of field with blurred edges, background elements at periphery.'
       },
       kitchen: {
-        positive: 'Modern kitchen counter setting, premium marble or granite countertop surface, natural window lighting from the side, warm ambient lighting, blurred background with kitchen appliances, professional product photography, shallow depth of field, bokeh effect, high-end residential kitchen',
-        negative: 'messy, dirty, old appliances, harsh shadows, direct flash, cluttered counters, food stains'
+        positive: 'Modern kitchen scene background for product photography, empty premium marble or granite countertop surface in center foreground, vacant placement area with clear space. Blurred kitchen appliances and cabinetry visible in background periphery, natural window lighting from side creating soft glow, warm ambient kitchen atmosphere. Professional photography setup, shallow depth of field, bokeh effect with sharp empty foreground ready for product.'
       },
       outdoors: {
-        positive: 'Natural outdoor setting for product photography, rustic wooden table or weathered stone surface, soft natural sunlight with gentle shadows, blurred nature background with green foliage, bokeh effect, golden hour lighting, professional commercial photography, serene atmosphere',
-        negative: 'harsh sunlight, overexposed, dark shadows, artificial elements, modern furniture, urban setting'
+        positive: 'Natural outdoor product photography background, empty weathered wooden table or stone surface in center foreground, vacant placement space with clear area. Blurred nature elements in background with green foliage bokeh, soft natural sunlight with gentle shadows, golden hour warm lighting. Rustic setting with background scenic elements at edges, shallow depth of field, sharp empty foreground surface ready for product placement.'
       },
       minimal: {
-        positive: 'Minimalist product photography background, pure solid color, ultra clean, no texture, perfect gradient, studio photography, professional commercial lighting, high key lighting',
-        negative: 'texture, patterns, objects, shadows, grain, noise'
+        positive: 'Minimalist empty product photography background, pure solid color gradient backdrop, ultra clean vacant space, smooth surface without texture. Perfect gradient fade from light to slightly deeper tone, studio photography lighting, high key commercial setup, professional clean aesthetic, empty foreground area, simple and uncluttered composition ready for product.'
       },
       luxury: {
-        positive: 'Luxury product photography setting, dark elegant background with gold or brass accents, dramatic lighting with edge lighting, premium materials like velvet or silk, high-end commercial photography, sophisticated atmosphere, shallow depth of field',
-        negative: 'cheap, plastic, bright colors, casual setting, harsh lighting'
+        positive: 'Luxury empty product photography background, dark elegant backdrop with subtle gold or brass accent elements visible at periphery edges, vacant center foreground space. Dramatic edge lighting creating sophisticated atmosphere, premium velvet or silk textures visible in blurred background, high-end commercial photography setup. Shallow depth of field with sharp empty foreground area, sophisticated dark ambiance ready for product placement.'
+      },
+      christmas: {
+        positive: 'Festive Christmas holiday product photography background, empty wooden table or surface in center foreground with vacant placement space, clear area ready for product. Blurred Christmas decorations in background periphery including pine branches with twinkling lights, red and green ornaments, bokeh effect from fairy lights. Warm cozy holiday atmosphere with soft golden lighting, rustic wooden surface in sharp focus, Christmas tree lights and garland visible but blurred in distant background. Professional photography setup with shallow depth of field, inviting festive ambiance.'
+      },
+      halloween: {
+        positive: 'Spooky Halloween themed product photography background, empty dark wooden surface or vintage table in center foreground, vacant placement area with clear space. Blurred Halloween decorations in background periphery including carved pumpkins with glowing faces, autumn leaves, cobwebs, dim atmospheric lighting with orange and purple accent lights. Moody dramatic atmosphere with fog effect in background, dark rustic surface in sharp focus. Professional photography setup with shallow depth of field, mysterious spooky Halloween ambiance ready for product placement.'
       }
     };
 
     const selected = prompts[theme] || prompts.default;
-
-    // Combine positive and negative (if API supports negative prompts)
-    // For now, just return positive prompt
     return selected.positive;
   }
 

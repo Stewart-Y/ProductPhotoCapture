@@ -1,11 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
-import { BarChart3, Briefcase, Settings, Activity } from 'lucide-react';
+import { BarChart3, Briefcase, Settings, Activity, Image } from 'lucide-react';
 
 const LINKS = [
   { href: '/', label: 'Dashboard', icon: BarChart3 },
   { href: '/jobs', label: 'Jobs', icon: Briefcase },
+  { href: '/templates', label: 'Templates', icon: Image },
 ];
 
 export const Sidebar: React.FC = () => {
@@ -42,10 +43,18 @@ export const Sidebar: React.FC = () => {
 
       {/* Footer */}
       <div className="p-4 border-t border-border">
-        <a href="/settings" className="flex items-center gap-3 px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <Link
+          to="/settings"
+          className={cn(
+            'flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors',
+            location.pathname === '/settings'
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
           <Settings className="w-5 h-5" />
           Settings
-        </a>
+        </Link>
       </div>
     </div>
   );

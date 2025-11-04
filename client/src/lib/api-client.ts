@@ -76,6 +76,7 @@ export interface Job {
   compositing_ms: number | null;
   derivatives_ms: number | null;
   manifest_ms: number | null;
+  workflow_type?: string; // 'cutout_composite' or 'seedream_edit'
 }
 
 export interface JobFilters {

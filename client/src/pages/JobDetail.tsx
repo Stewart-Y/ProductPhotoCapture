@@ -3,9 +3,10 @@ import { useParams } from 'react-router-dom';
 import { useJob, useRetryJob, useFailJob, usePresignedUrl } from '../hooks';
 import { Button, Card, CardContent, CardHeader, CardTitle, StatusBadge, Input } from '../components/ui';
 import { formatCurrency, formatDuration, formatRelativeTime } from '../lib/utils';
-import { AlertCircle, Copy, Check, Download, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { AlertCircle, Copy, Check, ExternalLink, Image as ImageIcon } from 'lucide-react';
 
-const STEPS = ['NEW', 'BG_REMOVED', 'BACKGROUND_READY', 'COMPOSITED', 'DERIVATIVES', 'SHOPIFY_PUSH', 'DONE'];
+const CUTOUT_COMPOSITE_STEPS = ['NEW', 'BG_REMOVED', 'BACKGROUND_READY', 'COMPOSITED', 'DERIVATIVES', 'SHOPIFY_PUSH', 'DONE'];
+const SEEDREAM_STEPS = ['NEW', 'COMPOSITED', 'DERIVATIVES', 'SHOPIFY_PUSH', 'DONE'];
 
 export const JobDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -19,6 +20,10 @@ export const JobDetail: React.FC = () => {
   const failJobMutation = useFailJob();
 
   const job = jobData?.job;
+
+  // Determine which workflow steps to use
+  const workflowType = job?.workflow_type || 'cutout_composite';
+  const STEPS = workflowType === 'seedream_edit' ? SEEDREAM_STEPS : CUTOUT_COMPOSITE_STEPS;
   const currentStepIndex = job && job.status ? STEPS.indexOf(job.status as any) : -1;
 
   const handleCopyField = (field: string, value: string | null) => {
@@ -70,7 +75,10 @@ export const JobDetail: React.FC = () => {
     derivatives_ms: job.derivatives_ms || null,
     manifest_ms: job.manifest_ms || null,
     img_sha256: job.img_sha256 || '',
+    workflow_type: job.workflow_type || 'cutout_composite',
   };
+
+  const isSeedreamWorkflow = safeJob.workflow_type === 'seedream_edit';
 
   return (
     <div className="space-y-6 p-6">
@@ -81,6 +89,18 @@ export const JobDetail: React.FC = () => {
           <p className="text-muted-foreground mt-1">
             Job ID: <span className="font-mono">{safeJob.id}</span>
           </p>
+          {/* Workflow Badge */}
+          <div className="mt-2">
+            {isSeedreamWorkflow ? (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                ⚡ Seedream Edit (Fast)
+              </span>
+            ) : (
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                ✂️ Cutout + Composite (Precise)
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex gap-2">
           {safeJob.status === 'FAILED' && (
@@ -152,26 +172,30 @@ export const JobDetail: React.FC = () => {
             >
               📥 Original
             </button>
-            <button
-              onClick={() => setActiveTab('cutout')}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'cutout'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              ✂️ Cutout & Mask
-            </button>
-            <button
-              onClick={() => setActiveTab('backgrounds')}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'backgrounds'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              🎨 Backgrounds (2)
-            </button>
+            {!isSeedreamWorkflow && (
+              <button
+                onClick={() => setActiveTab('cutout')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'cutout'
+                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                ✂️ Cutout & Mask
+              </button>
+            )}
+            {!isSeedreamWorkflow && (
+              <button
+                onClick={() => setActiveTab('backgrounds')}
+                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'backgrounds'
+                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                🎨 Backgrounds (2)
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('composites')}
               className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -180,7 +204,7 @@ export const JobDetail: React.FC = () => {
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              🖼️ Composites (2)
+              {isSeedreamWorkflow ? '🎨 AI Edited (2)' : '🖼️ Composites (2)'}
             </button>
             <button
               onClick={() => setActiveTab('derivatives')}
@@ -227,46 +251,13 @@ export const JobDetail: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'cutout' && <CutoutMaskTab jobId={safeJob.id} job={safeJob} />}
+          {activeTab === 'cutout' && !isSeedreamWorkflow && <CutoutMaskTab jobId={safeJob.id} job={safeJob} />}
 
-          {activeTab === 'backgrounds' && <BackgroundsTab jobId={safeJob.id} job={safeJob} />}
+          {activeTab === 'backgrounds' && !isSeedreamWorkflow && <BackgroundsTab jobId={safeJob.id} job={safeJob} />}
 
-          {activeTab === 'composites' && (
-            <div className="space-y-4">
-              {safeJob.s3_composite_keys && Array.isArray(safeJob.s3_composite_keys) ? (
-                <div className="grid grid-cols-2 gap-4">
-                  {safeJob.s3_composite_keys.map((key: string, i: number) => (
-                    <div key={i}>
-                      <p className="text-xs font-semibold text-muted-foreground mb-2">Composite {i + 1}</p>
-                      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center">
-                        <p className="text-xs text-muted-foreground">{key.split('/').pop()}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">Composites not yet generated</p>
-              )}
-            </div>
-          )}
+          {activeTab === 'composites' && <CompositesTab jobId={safeJob.id} job={safeJob} />}
 
-          {activeTab === 'derivatives' && (
-            <div className="space-y-4">
-              {safeJob.s3_derivative_keys && Array.isArray(safeJob.s3_derivative_keys) ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {safeJob.s3_derivative_keys.map((key: string, i: number) => (
-                    <div key={i} className="text-xs">
-                      <div className="bg-muted rounded p-2 min-h-[80px] flex items-center justify-center">
-                        <p className="text-muted-foreground text-center break-words">{key.split('/').pop()}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">Derivatives not yet generated</p>
-              )}
-            </div>
-          )}
+          {activeTab === 'derivatives' && <DerivativesTab jobId={safeJob.id} job={safeJob} />}
         </CardContent>
       </Card>
 
@@ -375,16 +366,20 @@ export const JobDetail: React.FC = () => {
                 <span className="text-sm text-muted-foreground">Download</span>
                 <span className="font-mono text-sm">{formatDuration(job.download_ms)}</span>
               </div>
+              {!isSeedreamWorkflow && (
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Segmentation</span>
+                  <span className="font-mono text-sm">{formatDuration(job.segmentation_ms)}</span>
+                </div>
+              )}
+              {!isSeedreamWorkflow && (
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Backgrounds</span>
+                  <span className="font-mono text-sm">{formatDuration(job.backgrounds_ms)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Segmentation</span>
-                <span className="font-mono text-sm">{formatDuration(job.segmentation_ms)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Backgrounds</span>
-                <span className="font-mono text-sm">{formatDuration(job.backgrounds_ms)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Compositing</span>
+                <span className="text-sm text-muted-foreground">{isSeedreamWorkflow ? 'AI Editing' : 'Compositing'}</span>
                 <span className="font-mono text-sm">{formatDuration(job.compositing_ms)}</span>
               </div>
               <div className="flex justify-between">
@@ -746,6 +741,174 @@ const BackgroundImage: React.FC<BackgroundImageProps> = ({ s3Key, index }) => {
         )}
       </div>
       <p className="text-xs text-muted-foreground mt-2 break-all">{s3Key}</p>
+    </div>
+  );
+};
+
+/**
+ * Composites Tab Component
+ * Displays composite images with presigned URLs
+ */
+interface CompositesTabProps {
+  jobId: string;
+  job: any;
+}
+
+const CompositesTab: React.FC<CompositesTabProps> = ({ jobId, job }) => {
+  if (!job || !job.s3_composite_keys || !Array.isArray(job.s3_composite_keys)) {
+    return <p className="text-muted-foreground text-center py-8">Composites not yet generated</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        {job.s3_composite_keys.map((key: string, i: number) => (
+          <CompositeImage key={i} s3Key={key} index={i + 1} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Individual Composite Image Component
+ * Fetches presigned URL for a specific S3 key
+ */
+interface CompositeImageProps {
+  s3Key: string;
+  index: number;
+}
+
+const CompositeImage: React.FC<CompositeImageProps> = ({ s3Key, index }) => {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const fetchPresignedUrl = async () => {
+      try {
+        setLoading(true);
+        setError(false);
+
+        // Call backend to get presigned URL for this specific S3 key
+        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        if (!response.ok) throw new Error('Failed to fetch presigned URL');
+
+        const data = await response.json();
+        setImageUrl(data.url);
+      } catch (err) {
+        console.error('Error fetching presigned URL:', err);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPresignedUrl();
+  }, [s3Key]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground mb-2">Composite {index}</p>
+      <div className="bg-muted rounded-lg p-2 min-h-[200px] flex items-center justify-center overflow-hidden">
+        {loading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {error && <p className="text-xs text-red-500">Failed to load image</p>}
+        {!loading && !error && imageUrl && (
+          <img
+            src={imageUrl}
+            alt={`Composite ${index}`}
+            className="max-h-full max-w-full object-contain rounded"
+            onError={() => setError(true)}
+          />
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground mt-2 break-all">{s3Key}</p>
+    </div>
+  );
+};
+
+/**
+ * Derivatives Tab Component
+ * Displays derivative images (hero, PDP, thumb) in multiple formats (JPG, WebP, AVIF)
+ */
+interface DerivativesTabProps {
+  jobId: string;
+  job: any;
+}
+
+const DerivativesTab: React.FC<DerivativesTabProps> = ({ jobId, job }) => {
+  if (!job || !job.s3_derivative_keys || !Array.isArray(job.s3_derivative_keys)) {
+    return <p className="text-muted-foreground text-center py-8">Derivatives not yet generated</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {job.s3_derivative_keys.map((key: string, i: number) => (
+          <DerivativeImage key={i} s3Key={key} index={i + 1} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Individual Derivative Image Component
+ * Fetches presigned URL for a specific S3 key
+ */
+interface DerivativeImageProps {
+  s3Key: string;
+  index: number;
+}
+
+const DerivativeImage: React.FC<DerivativeImageProps> = ({ s3Key, index }) => {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  // Extract filename from key (e.g., "1_hero.jpg", "2_pdp.webp")
+  const filename = s3Key.split('/').pop() || '';
+
+  useEffect(() => {
+    const fetchPresignedUrl = async () => {
+      try {
+        setLoading(true);
+        setError(false);
+
+        // Call backend to get presigned URL for this specific S3 key
+        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        if (!response.ok) throw new Error('Failed to fetch presigned URL');
+
+        const data = await response.json();
+        setImageUrl(data.url);
+      } catch (err) {
+        console.error('Error fetching presigned URL:', err);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPresignedUrl();
+  }, [s3Key]);
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground mb-2 truncate" title={filename}>
+        {filename}
+      </p>
+      <div className="bg-muted rounded-lg p-2 min-h-[120px] flex items-center justify-center overflow-hidden">
+        {loading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {error && <p className="text-xs text-red-500">Failed to load</p>}
+        {!loading && !error && imageUrl && (
+          <img
+            src={imageUrl}
+            alt={filename}
+            className="max-h-full max-w-full object-contain rounded"
+            onError={() => setError(true)}
+          />
+        )}
+      </div>
     </div>
   );
 };

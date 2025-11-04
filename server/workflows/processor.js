@@ -15,10 +15,14 @@
 
 import { getJob, listJobs, failJob } from '../jobs/manager.js';
 import { JobStatus, ErrorCode } from '../jobs/state-machine.js';
-import { getSegmentProvider, getBackgroundProvider } from '../providers/index.js';
+import { getSegmentProvider, getBackgroundProvider, getSeedreamProvider } from '../providers/index.js';
 import { compositeImage } from './composite.js';
+import { FreepikCompositeProvider } from '../providers/freepik/composite.js';
 import { generateDerivatives, batchGenerateDerivatives } from './derivatives.js';
 import { buildManifest } from './manifest.js';
+import { getBackgroundPrompt, getWorkflowPreference, getActiveBackgroundTemplate } from '../jobs/routes.js';
+import { getTemplateWithAssets } from './template-generator.js';
+import db from '../db.js';
 
 /**
  * Job Processor Configuration
@@ -143,6 +147,40 @@ async function processJob(jobId) {
       return;
     }
 
+    // ========================================
+    // WORKFLOW SELECTION
+    // ========================================
+    const workflowType = getWorkflowPreference();
+    console.log(`[Processor] [${jobId}] Using workflow: ${workflowType}`);
+
+    // Store workflow type in job record
+    db.prepare(`
+      UPDATE jobs SET workflow_type = ? WHERE id = ?
+    `).run(workflowType, jobId);
+
+    // ========================================
+    // BRANCH: WORKFLOW A vs WORKFLOW B
+    // ========================================
+    if (workflowType === 'seedream_edit') {
+      await processSeedreamWorkflow(jobId, job, db);
+    } else {
+      await processCutoutCompositeWorkflow(jobId, job, db);
+    }
+
+  } catch (error) {
+    console.error(`[Processor] [${jobId}] Pipeline error:`, error);
+    failJob(jobId, ErrorCode.UNKNOWN, error.message, error.stack);
+  }
+}
+
+/**
+ * WORKFLOW A: Cutout + Composite (Current - 7 steps)
+ * Precise control with background removal, generation, and compositing
+ */
+async function processCutoutCompositeWorkflow(jobId, job, db) {
+  console.log(`[Processor] [${jobId}] 🎯 WORKFLOW A: Cutout + Composite`);
+
+  try {
     // Flow v2 7-Step Pipeline
     // ===================================================
 
@@ -188,35 +226,73 @@ async function processJob(jobId) {
       jobId
     );
 
-    // Step 2: Background Generation (AI-generated backgrounds)
+    // Step 2: Background Generation (AI-generated backgrounds or template)
     const step2Start = Date.now();
     console.log(`[Processor] [${jobId}] Step 2/7: Background Generation`);
 
-    // Note: Freepik's Mystic API is async, so we use a simple gradient for now
-    // TODO: Implement proper async polling for Freepik Mystic API
-    const sharp = (await import('sharp')).default;
-    const storage = (await import('../storage/index.js')).getStorage();
-
-    const width = 1024;
-    const height = 1024;
-
-    // Generate 2 simple gradient backgrounds
     const backgrounds = [];
-    for (let i = 1; i <= 2; i++) {
-      const simpleBackground = await sharp({
-        create: {
-          width,
-          height,
-          channels: 3,
-          background: { r: 240 - (i * 20), g: 240 - (i * 20), b: 250 - (i * 10) }
-        }
-      })
-        .jpeg({ quality: 90 })
-        .toBuffer();
 
-      const bgS3Key = storage.getBackgroundKey(job.sku, job.img_sha256, job.theme, i);
-      await storage.uploadBuffer(bgS3Key, simpleBackground, 'image/jpeg');
-      backgrounds.push(bgS3Key);
+    // Check if there's an active background template
+    const activeTemplate = getActiveBackgroundTemplate();
+
+    if (activeTemplate) {
+      // Use pre-generated backgrounds from active template
+      console.log(`[Processor] [${jobId}] Using active template: "${activeTemplate.name}" (${activeTemplate.id})`);
+
+      const templateData = getTemplateWithAssets(activeTemplate.id, db, true); // onlySelected = true
+      if (!templateData || !templateData.assets || templateData.assets.length === 0) {
+        throw new Error(`Active template "${activeTemplate.name}" has no selected background variants`);
+      }
+
+      // Use template's background S3 keys (only selected variants)
+      backgrounds.push(...templateData.assets.map(asset => asset.s3_key));
+
+      // Update job to track which template was used
+      db.prepare('UPDATE jobs SET background_template_id = ? WHERE id = ?')
+        .run(activeTemplate.id, jobId);
+
+      console.log(`[Processor] [${jobId}] Using ${backgrounds.length} selected backgrounds from template (no generation cost)`);
+
+    } else {
+      // No active template - generate new backgrounds per job
+      console.log(`[Processor] [${jobId}] No active template - generating new backgrounds`);
+
+      // Get user's custom background theme prompt
+      const customPrompt = getBackgroundPrompt();
+
+      // Generate 2 AI backgrounds using Freepik Mystic API
+      const backgroundProvider = getBackgroundProvider();
+
+      if (customPrompt) {
+        console.log(`[Processor] [${jobId}] Using custom background prompt: "${customPrompt}"`);
+      }
+
+      for (let i = 1; i <= 2; i++) {
+        console.log(`[Processor] [${jobId}] Generating background ${i}/2 with Freepik Mystic...`);
+
+        const bgResult = await backgroundProvider.generateBackground({
+          theme: job.theme,
+          sku: job.sku,
+          sha256: job.img_sha256,
+          dimensions: { width: 1024, height: 1024 },
+          aspectRatio: 'square_1_1',
+          customPrompt,
+          variant: i
+        });
+
+        if (!bgResult.success) {
+          throw new Error(`Background generation ${i} failed: ${bgResult.error}`);
+        }
+
+        backgrounds.push(bgResult.s3Key);
+
+        // Track cost incrementally
+        if (bgResult.cost > 0) {
+          db.prepare('UPDATE jobs SET cost_usd = cost_usd + ? WHERE id = ?')
+            .run(bgResult.cost, jobId);
+          console.log(`[Processor] [${jobId}] Background ${i} cost: $${bgResult.cost.toFixed(4)}`);
+        }
+      }
     }
 
     const step2Duration = Date.now() - step2Start;
@@ -240,9 +316,9 @@ async function processJob(jobId) {
       jobId
     );
 
-    // Step 3: Compositing (cutout + backgrounds with drop shadow & centering)
+    // Step 3: AI-Powered Compositing (Freepik Seedream)
     const step3Start = Date.now();
-    console.log(`[Processor] [${jobId}] Step 3/7: Compositing with drop shadow`);
+    console.log(`[Processor] [${jobId}] Step 3/7: AI-Powered Compositing (Freepik Seedream)`);
 
     job = getJob(jobId); // Refresh job data
 
@@ -257,32 +333,42 @@ async function processJob(jobId) {
       throw new Error('No backgrounds available');
     }
 
-    // Composite each background
+    // Initialize Freepik AI Compositor
+    const aiCompositor = new FreepikCompositeProvider({
+      apiKey: process.env.FREEPIK_API_KEY
+    });
+
+    // AI composite each background
     const composites = [];
+    let totalCompositeCost = 0;
+
     for (let i = 0; i < bgS3Keys.length; i++) {
-      const result = await compositeImage({
-        maskS3Key: cutoutS3Key, // Use cutout (has alpha) instead of mask
+      const result = await aiCompositor.compositeImage({
+        cutoutS3Key: cutoutS3Key,
         backgroundS3Key: bgS3Keys[i],
         sku: job.sku,
         sha256: job.img_sha256,
         theme: job.theme,
         variant: i + 1,
         options: {
-          quality: 90,
-          format: 'jpeg',
-          dropShadow: true, // Flow v2 feature
-          shadowBlur: 20,
-          shadowOpacity: 0.3,
-          shadowOffsetX: 5,
-          shadowOffsetY: 5
+          aspect: '1x1',
+          type: 'master'
         }
       });
 
       if (!result.success) {
-        throw new Error(`Compositing failed: ${result.error}`);
+        throw new Error(`AI Compositing failed: ${result.error}`);
       }
 
       composites.push(result.s3Key);
+      totalCompositeCost += result.cost || 0;
+
+      // Track cost incrementally
+      if (result.cost > 0) {
+        db.prepare('UPDATE jobs SET cost_usd = cost_usd + ? WHERE id = ?')
+          .run(result.cost, jobId);
+        console.log(`[Processor] [${jobId}] AI Composite ${i + 1} cost: $${result.cost.toFixed(4)}`);
+      }
     }
 
     const step3Duration = Date.now() - step3Start;
@@ -411,7 +497,277 @@ async function processJob(jobId) {
     });
 
   } catch (error) {
-    console.error(`[Processor] [${jobId}] Pipeline error:`, error);
+    console.error(`[Processor] [${jobId}] Cutout+Composite workflow error:`, error);
+    failJob(jobId, ErrorCode.UNKNOWN, error.message, error.stack);
+  }
+}
+
+/**
+ * WORKFLOW B: Seedream 4 Edit (New - 5 steps)
+ * Fast single-step AI background replacement
+ */
+async function processSeedreamWorkflow(jobId, job, db) {
+  console.log(`[Processor] [${jobId}] ⚡ WORKFLOW B: Seedream 4 Edit (Single-Step)`);
+
+  const startTime = Date.now();
+
+  try {
+    // Step 1: Download original + Background Removal (for cutout backup)
+    const step1Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 1/5: Download + Background Removal`);
+
+    const segmentProvider = getSegmentProvider();
+    const segmentResult = await segmentProvider.removeBackground({
+      imageUrl: job.source_url,
+      sku: job.sku,
+      sha256: job.img_sha256
+    });
+
+    if (!segmentResult.success) {
+      throw new Error(`Background removal failed: ${segmentResult.error}`);
+    }
+
+    const step1Duration = Date.now() - step1Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 1 complete (${step1Duration}ms)`);
+
+    db.prepare(`
+      UPDATE jobs
+      SET s3_cutout_key = ?,
+          s3_mask_key = ?,
+          segmentation_ms = ?,
+          cost_usd = cost_usd + ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      segmentResult.cutout.s3Key,
+      segmentResult.mask.s3Key,
+      step1Duration,
+      segmentResult.cost,
+      jobId
+    );
+
+    // Step 2: Seedream 4 Edit - Single-step background replacement
+    const step2Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 2/5: Seedream 4 Edit (AI Background Replacement)`);
+
+    // Check for active background template
+    const activeTemplateId = getActiveBackgroundTemplate();
+    let templateAssets = null;
+
+    if (activeTemplateId) {
+      console.log(`[Processor] [${jobId}] Active template detected: ${activeTemplateId}`);
+      const template = getTemplateWithAssets(activeTemplateId, db);
+
+      if (template && template.assets && template.assets.length > 0) {
+        templateAssets = template.assets;
+        console.log(`[Processor] [${jobId}] Using template "${template.name}" with ${templateAssets.length} variants`);
+
+        // Store template ID in job for tracking
+        db.prepare('UPDATE jobs SET background_template_id = ? WHERE id = ?')
+          .run(activeTemplateId, jobId);
+      } else {
+        console.warn(`[Processor] [${jobId}] Template ${activeTemplateId} has no assets, falling back to prompt`);
+      }
+    }
+
+    const seedreamProvider = getSeedreamProvider();
+    const composites = [];
+
+    if (templateAssets && templateAssets.length > 0) {
+      // TEMPLATE MODE: Use template backgrounds with Seedream Edit
+      console.log(`[Processor] [${jobId}] Template Mode: Using ${Math.min(2, templateAssets.length)} template backgrounds`);
+
+      const templatesToUse = templateAssets.slice(0, 2); // Use first 2 template variants
+
+      for (let i = 0; i < templatesToUse.length; i++) {
+        const templateAsset = templatesToUse[i];
+        console.log(`[Processor] [${jobId}] Compositing cutout with template variant ${templateAsset.variant}...`);
+
+        // Use Seedream to composite cutout with template background
+        const editResult = await seedreamProvider.editBackground({
+          imageUrl: segmentResult.cutout.s3Url, // Use cutout instead of original
+          templateS3Key: templateAsset.s3_key,   // Pass template S3 key
+          theme: job.theme,
+          sku: job.sku,
+          sha256: job.img_sha256,
+          customPrompt: null, // Template provides the background
+          variant: i + 1
+        });
+
+        if (!editResult.success) {
+          throw new Error(`Seedream template edit ${i + 1} failed: ${editResult.error}`);
+        }
+
+        composites.push(editResult.s3Key);
+
+        if (editResult.cost > 0) {
+          db.prepare('UPDATE jobs SET cost_usd = cost_usd + ? WHERE id = ?')
+            .run(editResult.cost, jobId);
+          console.log(`[Processor] [${jobId}] Seedream template edit ${i + 1} cost: $${editResult.cost.toFixed(4)}`);
+        }
+      }
+
+      // Update template usage count
+      db.prepare('UPDATE background_templates SET used_count = used_count + 1 WHERE id = ?')
+        .run(activeTemplateId);
+
+    } else {
+      // PROMPT MODE: Generate themed backgrounds with Seedream Edit
+      console.log(`[Processor] [${jobId}] Prompt Mode: Generating themed backgrounds`);
+
+      const customPrompt = getBackgroundPrompt();
+
+      if (customPrompt) {
+        console.log(`[Processor] [${jobId}] Using custom prompt: "${customPrompt}"`);
+      }
+
+      // Generate 2 variants using Seedream
+      for (let i = 1; i <= 2; i++) {
+        console.log(`[Processor] [${jobId}] Generating Seedream edit ${i}/2...`);
+
+        const editResult = await seedreamProvider.editBackground({
+          imageUrl: job.source_url,
+          theme: job.theme,
+          sku: job.sku,
+          sha256: job.img_sha256,
+          customPrompt,
+          variant: i
+        });
+
+        if (!editResult.success) {
+          throw new Error(`Seedream edit ${i} failed: ${editResult.error}`);
+        }
+
+        composites.push(editResult.s3Key);
+
+        if (editResult.cost > 0) {
+          db.prepare('UPDATE jobs SET cost_usd = cost_usd + ? WHERE id = ?')
+            .run(editResult.cost, jobId);
+          console.log(`[Processor] [${jobId}] Seedream edit ${i} cost: $${editResult.cost.toFixed(4)}`);
+        }
+      }
+    }
+
+    const step2Duration = Date.now() - step2Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 2 complete (${step2Duration}ms):`, {
+      composites: composites.length
+    });
+
+    // Update job: SKIP compositing step, go straight to COMPOSITED status
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          s3_composite_keys = ?,
+          compositing_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      JobStatus.COMPOSITED,
+      JSON.stringify(composites),
+      step2Duration,
+      jobId
+    );
+
+    // Step 3: Derivatives Generation
+    const step3Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 3/5: Generating derivatives`);
+
+    job = getJob(jobId);
+    const compositeS3Keys = JSON.parse(job.s3_composite_keys);
+
+    const derivativesResult = await batchGenerateDerivatives({
+      compositeS3Keys,
+      sku: job.sku,
+      sha256: job.img_sha256,
+      theme: job.theme
+    });
+
+    if (!derivativesResult.success) {
+      throw new Error('Derivatives generation failed');
+    }
+
+    const allDerivativeKeys = derivativesResult.results
+      .flatMap(r => r.derivatives || [])
+      .map(d => d.s3Key);
+
+    const step3Duration = Date.now() - step3Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 3 complete (${step3Duration}ms):`, {
+      totalDerivatives: allDerivativeKeys.length
+    });
+
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          s3_derivative_keys = ?,
+          derivatives_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      JobStatus.DERIVATIVES,
+      JSON.stringify(allDerivativeKeys),
+      step3Duration,
+      jobId
+    );
+
+    // Step 4: Manifest Generation
+    const step4Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 4/5: Building manifest`);
+
+    job = getJob(jobId);
+
+    const manifestResult = await buildManifest(job, {
+      derivatives: derivativesResult.results.flatMap(r => r.derivatives || [])
+    });
+
+    if (!manifestResult.success) {
+      throw new Error(`Manifest generation failed: ${manifestResult.error}`);
+    }
+
+    const step4Duration = Date.now() - step4Start;
+
+    console.log(`[Processor] [${jobId}] ✅ Step 4 complete (${step4Duration}ms):`, {
+      manifest: manifestResult.s3Key
+    });
+
+    db.prepare(`
+      UPDATE jobs
+      SET manifest_s3_key = ?,
+          manifest_ms = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      manifestResult.s3Key,
+      step4Duration,
+      jobId
+    );
+
+    // Step 5: Mark as DONE (skip Shopify for now)
+    console.log(`[Processor] [${jobId}] Step 5/5: Completing job`);
+
+    db.prepare(`
+      UPDATE jobs
+      SET status = ?,
+          completed_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(JobStatus.DONE, jobId);
+
+    const totalDuration = Date.now() - startTime;
+
+    console.log(`[Processor] [${jobId}] ✅ Seedream workflow complete (${totalDuration}ms)`);
+    console.log(`[Processor] [${jobId}] Timing breakdown:`, {
+      segmentation: `${step1Duration}ms`,
+      seedream_edit: `${step2Duration}ms`,
+      derivatives: `${step3Duration}ms`,
+      manifest: `${step4Duration}ms`,
+      total: `${totalDuration}ms`
+    });
+
+  } catch (error) {
+    console.error(`[Processor] [${jobId}] Seedream workflow error:`, error);
     failJob(jobId, ErrorCode.UNKNOWN, error.message, error.stack);
   }
 }

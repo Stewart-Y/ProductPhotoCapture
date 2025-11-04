@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
+import Settings from './pages/Settings';
+import BackgroundTemplates from './pages/BackgroundTemplates';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 
@@ -22,6 +24,8 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id" element={<JobDetail />} />
+            <Route path="/templates" element={<BackgroundTemplates />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </div>

@@ -7,12 +7,14 @@
 
 import { FreepikSegmentProvider } from './freepik/segment.js';
 import { FreepikBackgroundProvider } from './freepik/background.js';
+import { FreepikSeedreamProvider } from './freepik/seedream.js';
 
 // Provider registry
 const PROVIDERS = {
   freepik: {
     segment: FreepikSegmentProvider,
-    background: FreepikBackgroundProvider
+    background: FreepikBackgroundProvider,
+    seedream: FreepikSeedreamProvider
   }
   // Add more providers here:
   // replicate: {
@@ -24,6 +26,7 @@ const PROVIDERS = {
 // Singleton instances
 let segmentProvider = null;
 let backgroundProvider = null;
+let seedreamProvider = null;
 
 /**
  * Get segmentation provider instance
@@ -103,11 +106,41 @@ function getProviderApiKey(providerName) {
 }
 
 /**
+ * Get Seedream edit provider instance
+ * Creates singleton on first call
+ */
+export function getSeedreamProvider() {
+  if (seedreamProvider) {
+    return seedreamProvider;
+  }
+
+  const providerName = process.env.AI_PROVIDER || 'freepik';
+  const providerClass = PROVIDERS[providerName]?.seedream;
+
+  if (!providerClass) {
+    throw new Error(`Unsupported AI provider for Seedream editing: ${providerName}`);
+  }
+
+  // Get API key based on provider
+  const apiKey = getProviderApiKey(providerName);
+
+  seedreamProvider = new providerClass({
+    apiKey,
+    name: `${providerName}-seedream`
+  });
+
+  console.log(`[ProviderFactory] Initialized Seedream provider: ${providerName}`);
+
+  return seedreamProvider;
+}
+
+/**
  * Reset providers (useful for testing)
  */
 export function resetProviders() {
   segmentProvider = null;
   backgroundProvider = null;
+  seedreamProvider = null;
 }
 
 /**
@@ -127,6 +160,7 @@ export function isProviderSupported(providerName) {
 export default {
   getSegmentProvider,
   getBackgroundProvider,
+  getSeedreamProvider,
   resetProviders,
   getSupportedProviders,
   isProviderSupported

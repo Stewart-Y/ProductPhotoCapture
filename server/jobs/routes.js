@@ -25,6 +25,12 @@ import { JobStatus, ErrorCode } from './state-machine.js';
 import { verify3JMSWebhook } from './webhook-verify.js';
 import getS3Storage from '../storage/s3.js';
 import { getProcessorStatus, getProcessorConfig } from '../workflows/processor.js';
+import {
+  generateBackgroundTemplate,
+  regenerateTemplateVariants,
+  getTemplateWithAssets,
+  refreshTemplateAssetUrls
+} from '../workflows/template-generator.js';
 
 const router = express.Router();
 const s3 = getS3Storage();
@@ -701,6 +707,721 @@ router.post('/upload-test-image', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('[TestUpload] Error:', error);
     res.status(500).json({ error: 'Failed to upload test image', details: error.message });
+  }
+});
+
+// =============================================================================
+// AI Prompt Endpoints - Store and retrieve prompts for cutout and background
+// =============================================================================
+
+// In-memory prompt storage (will be replaced with database storage)
+let cutoutPrompt = null;
+let backgroundPrompt = null;
+
+// Export functions to access prompts from other modules
+export function getCutoutPrompt() {
+  return cutoutPrompt;
+}
+
+export function getBackgroundPrompt() {
+  return backgroundPrompt;
+}
+
+// GET /prompts/cutout - Retrieve cutout prompt
+router.get('/prompts/cutout', (req, res) => {
+  try {
+    res.json({ prompt: cutoutPrompt });
+  } catch (error) {
+    console.error('[Get Cutout Prompt] Error:', error);
+    res.status(500).json({ error: 'Failed to get cutout prompt', details: error.message });
+  }
+});
+
+// POST /prompts/cutout - Save cutout prompt
+router.post('/prompts/cutout', (req, res) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required and must be a string' });
+    }
+
+    cutoutPrompt = prompt.trim();
+    console.log(`[Cutout Prompt] Updated: "${cutoutPrompt}"`);
+
+    res.json({
+      success: true,
+      prompt: cutoutPrompt,
+      message: 'Cutout prompt saved successfully'
+    });
+
+  } catch (error) {
+    console.error('[Save Cutout Prompt] Error:', error);
+    res.status(500).json({ error: 'Failed to save cutout prompt', details: error.message });
+  }
+});
+
+// GET /prompts/background - Retrieve background theme prompt
+router.get('/prompts/background', (req, res) => {
+  try {
+    res.json({ prompt: backgroundPrompt });
+  } catch (error) {
+    console.error('[Get Background Prompt] Error:', error);
+    res.status(500).json({ error: 'Failed to get background prompt', details: error.message });
+  }
+});
+
+// POST /prompts/background - Save background theme prompt
+router.post('/prompts/background', (req, res) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required and must be a string' });
+    }
+
+    backgroundPrompt = prompt.trim();
+    console.log(`[Background Prompt] Updated: "${backgroundPrompt}"`);
+
+    res.json({
+      success: true,
+      prompt: backgroundPrompt,
+      message: 'Background prompt saved successfully'
+    });
+
+  } catch (error) {
+    console.error('[Save Background Prompt] Error:', error);
+    res.status(500).json({ error: 'Failed to save background prompt', details: error.message });
+  }
+});
+
+// =============================================================================
+// Workflow Preference Endpoints - Store and retrieve workflow setting
+// =============================================================================
+
+// GET /settings/workflow - Retrieve workflow preference
+router.get('/settings/workflow', (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'workflow_preference'
+    `).get();
+
+    const workflow = result?.value || 'cutout_composite';
+
+    res.json({
+      workflow,
+      options: ['cutout_composite', 'seedream_edit']
+    });
+  } catch (error) {
+    console.error('[Get Workflow] Error:', error);
+    res.status(500).json({ error: 'Failed to get workflow preference', details: error.message });
+  }
+});
+
+// POST /settings/workflow - Save workflow preference
+router.post('/settings/workflow', (req, res) => {
+  try {
+    const { workflow } = req.body;
+
+    if (!workflow || !['cutout_composite', 'seedream_edit'].includes(workflow)) {
+      return res.status(400).json({
+        error: 'Invalid workflow',
+        validValues: ['cutout_composite', 'seedream_edit']
+      });
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('workflow_preference', ?, datetime('now'))
+    `).run(workflow);
+
+    console.log(`[Workflow] Updated preference to: ${workflow}`);
+
+    res.json({
+      success: true,
+      workflow,
+      message: 'Workflow preference saved successfully'
+    });
+
+  } catch (error) {
+    console.error('[Save Workflow] Error:', error);
+    res.status(500).json({ error: 'Failed to save workflow preference', details: error.message });
+  }
+});
+
+// Export function to access workflow preference from other modules
+export function getWorkflowPreference() {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'workflow_preference'
+    `).get();
+    return result?.value || 'cutout_composite';
+  } catch (error) {
+    console.error('[Get Workflow Preference] Error:', error);
+    return 'cutout_composite'; // Safe fallback
+  }
+}
+
+// =============================================================================
+// Background Template Endpoints - Manage reusable background templates
+// =============================================================================
+
+// GET /templates - List all active templates
+router.get('/templates', async (req, res) => {
+  try {
+    const status = req.query.status || 'active';
+
+    let query = `
+      SELECT
+        t.*,
+        COUNT(a.id) as variant_count
+      FROM background_templates t
+      LEFT JOIN template_assets a ON t.id = a.template_id
+    `;
+
+    if (status && status !== 'all') {
+      query += ` WHERE t.status = ?`;
+    }
+
+    query += ` GROUP BY t.id ORDER BY t.created_at DESC`;
+
+    const templates = status && status !== 'all'
+      ? db.prepare(query).all(status)
+      : db.prepare(query).all();
+
+    res.json({
+      success: true,
+      templates,
+      count: templates.length
+    });
+
+  } catch (error) {
+    console.error('[List Templates] Error:', error);
+    res.status(500).json({ error: 'Failed to list templates', details: error.message });
+  }
+});
+
+// GET /templates/:id - Get specific template with assets
+router.get('/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const template = getTemplateWithAssets(id, db);
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Refresh presigned URLs if expired or close to expiry
+    const now = new Date();
+    const needsRefresh = template.assets.some(asset => {
+      const expiresAt = new Date(asset.s3_url_expires_at);
+      const minutesUntilExpiry = (expiresAt - now) / 1000 / 60;
+      return minutesUntilExpiry < 10; // Refresh if less than 10 minutes remaining
+    });
+
+    if (needsRefresh) {
+      await refreshTemplateAssetUrls(id, db);
+      // Fetch updated template
+      const updatedTemplate = getTemplateWithAssets(id, db);
+      return res.json({
+        success: true,
+        template: updatedTemplate
+      });
+    }
+
+    res.json({
+      success: true,
+      template
+    });
+
+  } catch (error) {
+    console.error('[Get Template] Error:', error);
+    res.status(500).json({ error: 'Failed to get template', details: error.message });
+  }
+});
+
+// POST /templates - Create new template (triggers async generation)
+router.post('/templates', async (req, res) => {
+  try {
+    const { name, customPrompt, variantCount } = req.body;
+
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'Template name is required' });
+    }
+
+    if (!customPrompt || typeof customPrompt !== 'string') {
+      return res.status(400).json({ error: 'Custom prompt is required' });
+    }
+
+    console.log('[Create Template] Starting generation:', { name, customPrompt: customPrompt.substring(0, 50) + '...', variantCount });
+
+    // Trigger async generation (don't await - let it run in background)
+    const result = await generateBackgroundTemplate({
+      name,
+      theme: 'custom',
+      customPrompt,
+      variantCount: variantCount || 3,
+      db
+    });
+
+    if (!result.success) {
+      return res.status(500).json({
+        error: 'Template generation failed',
+        details: result.error
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      templateId: result.templateId,
+      message: 'Template created and generation started',
+      result
+    });
+
+  } catch (error) {
+    console.error('[Create Template] Error:', error);
+    res.status(500).json({ error: 'Failed to create template', details: error.message });
+  }
+});
+
+// PUT /templates/:id - Update template metadata
+router.put('/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, status } = req.body;
+
+    // Check if template exists
+    const template = db.prepare(`
+      SELECT * FROM background_templates WHERE id = ?
+    `).get(id);
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Build update query
+    const updates = [];
+    const values = [];
+
+    if (name && typeof name === 'string') {
+      updates.push('name = ?');
+      values.push(name);
+    }
+
+    if (status && ['active', 'archived'].includes(status)) {
+      updates.push('status = ?');
+      values.push(status);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    updates.push('updated_at = datetime(\'now\')');
+    values.push(id);
+
+    db.prepare(`
+      UPDATE background_templates
+      SET ${updates.join(', ')}
+      WHERE id = ?
+    `).run(...values);
+
+    console.log(`[Update Template] Updated template ${id}:`, { name, status });
+
+    res.json({
+      success: true,
+      message: 'Template updated successfully'
+    });
+
+  } catch (error) {
+    console.error('[Update Template] Error:', error);
+    res.status(500).json({ error: 'Failed to update template', details: error.message });
+  }
+});
+
+// DELETE /templates/:id - Archive template
+router.delete('/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if template exists
+    const template = db.prepare(`
+      SELECT * FROM background_templates WHERE id = ?
+    `).get(id);
+
+    if (!template) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    // Archive instead of delete (soft delete)
+    db.prepare(`
+      UPDATE background_templates
+      SET status = 'archived', updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
+
+    console.log(`[Delete Template] Archived template ${id}`);
+
+    res.json({
+      success: true,
+      message: 'Template archived successfully'
+    });
+
+  } catch (error) {
+    console.error('[Delete Template] Error:', error);
+    res.status(500).json({ error: 'Failed to delete template', details: error.message });
+  }
+});
+
+// POST /templates/:id/regenerate - Generate additional variants for existing template
+router.post('/templates/:id/regenerate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { variantCount } = req.body;
+
+    const result = await regenerateTemplateVariants({
+      templateId: id,
+      variantCount: variantCount || 3,
+      db
+    });
+
+    if (!result.success) {
+      return res.status(500).json({
+        error: 'Variant regeneration failed',
+        details: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Variants generated successfully',
+      result
+    });
+
+  } catch (error) {
+    console.error('[Regenerate Variants] Error:', error);
+    res.status(500).json({ error: 'Failed to regenerate variants', details: error.message });
+  }
+});
+
+// GET /settings/active-template - Get active background template
+router.get('/settings/active-template', async (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'active_background_template'
+    `).get();
+
+    const templateId = result?.value || null;
+
+    if (!templateId) {
+      return res.json({
+        success: true,
+        activeTemplate: null
+      });
+    }
+
+    // Fetch template details
+    const template = getTemplateWithAssets(templateId, db);
+
+    res.json({
+      success: true,
+      activeTemplate: template
+    });
+
+  } catch (error) {
+    console.error('[Get Active Template] Error:', error);
+    res.status(500).json({ error: 'Failed to get active template', details: error.message });
+  }
+});
+
+// POST /settings/active-template - Set active background template
+router.post('/settings/active-template', async (req, res) => {
+  try {
+    const { templateId } = req.body;
+
+    // Validate templateId if provided (null is allowed to clear)
+    if (templateId) {
+      const template = db.prepare(`
+        SELECT * FROM background_templates WHERE id = ? AND status = 'active'
+      `).get(templateId);
+
+      if (!template) {
+        return res.status(404).json({ error: 'Template not found or not active' });
+      }
+    }
+
+    // Update setting (use empty string instead of NULL to avoid NOT NULL constraint)
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('active_background_template', ?, datetime('now'))
+    `).run(templateId || '');
+
+    console.log(`[Active Template] Set to: ${templateId || 'none'}`);
+
+    res.json({
+      success: true,
+      templateId,
+      message: 'Active template updated successfully'
+    });
+
+  } catch (error) {
+    console.error('[Set Active Template] Error:', error);
+    res.status(500).json({ error: 'Failed to set active template', details: error.message });
+  }
+});
+
+// Export function to access active template from other modules
+export function getActiveBackgroundTemplate() {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'active_background_template'
+    `).get();
+
+    const templateId = result?.value;
+    // Empty string means no active template
+    if (!templateId || templateId === '') {
+      return null;
+    }
+
+    // Return the full template object
+    const template = db.prepare(`
+      SELECT * FROM background_templates WHERE id = ? AND status = 'active'
+    `).get(templateId);
+
+    return template || null;
+  } catch (error) {
+    console.error('[Get Active Background Template] Error:', error);
+    return null;
+  }
+}
+
+// ============================================================================
+// Custom Prompts API
+// ============================================================================
+
+/**
+ * GET /api/custom-prompts
+ * List all custom prompt presets
+ */
+router.get('/custom-prompts', async (req, res) => {
+  try {
+    const prompts = db.prepare(`
+      SELECT * FROM custom_prompts
+      ORDER BY is_default DESC, title ASC
+    `).all();
+
+    res.json({
+      success: true,
+      prompts
+    });
+  } catch (error) {
+    console.error('[List Custom Prompts] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/custom-prompts
+ * Create a new custom prompt preset
+ */
+router.post('/custom-prompts', async (req, res) => {
+  try {
+    const { title, prompt } = req.body;
+
+    if (!title || !prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Title and prompt are required'
+      });
+    }
+
+    // Generate unique ID
+    const id = `prompt_${crypto.randomBytes(8).toString('hex')}`;
+
+    // Insert new prompt
+    db.prepare(`
+      INSERT INTO custom_prompts (id, title, prompt, is_default, created_at)
+      VALUES (?, ?, ?, 0, datetime('now'))
+    `).run(id, title, prompt);
+
+    // Fetch the created prompt
+    const newPrompt = db.prepare(`
+      SELECT * FROM custom_prompts WHERE id = ?
+    `).get(id);
+
+    res.json({
+      success: true,
+      prompt: newPrompt
+    });
+  } catch (error) {
+    console.error('[Create Custom Prompt] Error:', error);
+
+    // Handle unique constraint violation
+    if (error.message.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({
+        success: false,
+        error: 'A prompt with this title already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/custom-prompts/:id
+ * Delete a custom prompt preset (only non-default prompts)
+ */
+router.delete('/custom-prompts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if prompt exists and is not default
+    const prompt = db.prepare(`
+      SELECT * FROM custom_prompts WHERE id = ?
+    `).get(id);
+
+    if (!prompt) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prompt not found'
+      });
+    }
+
+    if (prompt.is_default) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot delete default prompts'
+      });
+    }
+
+    // Delete the prompt
+    db.prepare(`
+      DELETE FROM custom_prompts WHERE id = ?
+    `).run(id);
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error('[Delete Custom Prompt] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/custom-prompts/:id
+ * Update a custom prompt preset (only non-default prompts)
+ */
+router.patch('/custom-prompts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, prompt } = req.body;
+
+    // Check if prompt exists and is not default
+    const existingPrompt = db.prepare(`
+      SELECT * FROM custom_prompts WHERE id = ?
+    `).get(id);
+
+    if (!existingPrompt) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prompt not found'
+      });
+    }
+
+    if (existingPrompt.is_default) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot edit default prompts'
+      });
+    }
+
+    // Update the prompt
+    db.prepare(`
+      UPDATE custom_prompts
+      SET title = COALESCE(?, title),
+          prompt = COALESCE(?, prompt),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(title || null, prompt || null, id);
+
+    // Fetch updated prompt
+    const updatedPrompt = db.prepare(`
+      SELECT * FROM custom_prompts WHERE id = ?
+    `).get(id);
+
+    res.json({
+      success: true,
+      prompt: updatedPrompt
+    });
+  } catch (error) {
+    console.error('[Update Custom Prompt] Error:', error);
+
+    // Handle unique constraint violation
+    if (error.message.includes('UNIQUE constraint failed')) {
+      return res.status(409).json({
+        success: false,
+        error: 'A prompt with this title already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/templates/:templateId/variants/:variantId/toggle
+ * Toggle variant selection (selected true/false)
+ */
+router.patch('/templates/:templateId/variants/:variantId/toggle', async (req, res) => {
+  try {
+    const { templateId, variantId } = req.params;
+
+    // Get current selection state
+    const asset = db.prepare(`
+      SELECT id, selected FROM template_assets
+      WHERE template_id = ? AND id = ?
+    `).get(templateId, variantId);
+
+    if (!asset) {
+      return res.status(404).json({
+        success: false,
+        error: 'Variant not found'
+      });
+    }
+
+    // Toggle selection
+    const newState = asset.selected ? 0 : 1;
+    db.prepare(`
+      UPDATE template_assets
+      SET selected = ?
+      WHERE id = ?
+    `).run(newState, variantId);
+
+    res.json({
+      success: true,
+      selected: newState === 1
+    });
+
+  } catch (error) {
+    console.error('[API] Failed to toggle variant selection:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
