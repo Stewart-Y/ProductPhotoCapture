@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui';
-import { Save, Sparkles, Zap, Target, Plus, X, Trash2 } from 'lucide-react';
+import { Sparkles, Zap, Target, Plus, X, Trash2 } from 'lucide-react';
 
 interface CustomPrompt {
   id: string;
@@ -24,7 +24,7 @@ export const Settings: React.FC = () => {
 
   // Workflow preference state
   const [workflowPreference, setWorkflowPreference] = useState<'cutout_composite' | 'seedream_edit'>('cutout_composite');
-  const [isSavingWorkflow, setIsSavingWorkflow] = useState(false);
+  const [, setIsSavingWorkflow] = useState(false);
   const [workflowSuccess, setWorkflowSuccess] = useState(false);
 
   // Load custom prompts and workflow preference on mount

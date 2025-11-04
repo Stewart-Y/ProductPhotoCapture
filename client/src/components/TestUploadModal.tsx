@@ -14,7 +14,7 @@ export default function TestUploadModal({ open, onClose, onSuccess }: Props) {
   const [preview, setPreview] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [sku, setSku] = useState('TEST-SKU-' + Math.random().toString(36).substring(7).toUpperCase());
-  const [imageUrl, setImageUrl] = useState('');
+  const [, setImageUrl] = useState('');
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -672,7 +672,7 @@ interface BackgroundsTabProps {
   job: any;
 }
 
-const BackgroundsTab: React.FC<BackgroundsTabProps> = ({ jobId, job }) => {
+const BackgroundsTab: React.FC<BackgroundsTabProps> = ({ job }) => {
   if (!job || !job.s3_bg_keys || !Array.isArray(job.s3_bg_keys)) {
     return <p className="text-muted-foreground text-center py-8">Backgrounds not yet generated</p>;
   }
@@ -754,7 +754,7 @@ interface CompositesTabProps {
   job: any;
 }
 
-const CompositesTab: React.FC<CompositesTabProps> = ({ jobId, job }) => {
+const CompositesTab: React.FC<CompositesTabProps> = ({ job }) => {
   if (!job || !job.s3_composite_keys || !Array.isArray(job.s3_composite_keys)) {
     return <p className="text-muted-foreground text-center py-8">Composites not yet generated</p>;
   }
@@ -836,7 +836,7 @@ interface DerivativesTabProps {
   job: any;
 }
 
-const DerivativesTab: React.FC<DerivativesTabProps> = ({ jobId, job }) => {
+const DerivativesTab: React.FC<DerivativesTabProps> = ({ job }) => {
   if (!job || !job.s3_derivative_keys || !Array.isArray(job.s3_derivative_keys)) {
     return <p className="text-muted-foreground text-center py-8">Derivatives not yet generated</p>;
   }
@@ -861,7 +861,7 @@ interface DerivativeImageProps {
   index: number;
 }
 
-const DerivativeImage: React.FC<DerivativeImageProps> = ({ s3Key, index }) => {
+const DerivativeImage: React.FC<DerivativeImageProps> = ({ s3Key }) => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
