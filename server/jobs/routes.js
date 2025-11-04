@@ -724,7 +724,41 @@ export function getCutoutPrompt() {
 }
 
 export function getBackgroundPrompt() {
-  return backgroundPrompt;
+  try {
+    // First, check if there's a selected custom prompt in settings
+    const selectedPromptSetting = db.prepare(`
+      SELECT value FROM settings WHERE key = 'selected_prompt_id'
+    `).get();
+
+    if (selectedPromptSetting && selectedPromptSetting.value) {
+      // Fetch the selected custom prompt from the database
+      const customPrompt = db.prepare(`
+        SELECT prompt FROM custom_prompts WHERE id = ?
+      `).get(selectedPromptSetting.value);
+
+      if (customPrompt) {
+        console.log('[getBackgroundPrompt] Using selected custom prompt:', selectedPromptSetting.value);
+        return customPrompt.prompt;
+      }
+    }
+
+    // Fallback: Use the default custom prompt
+    const defaultPrompt = db.prepare(`
+      SELECT prompt FROM custom_prompts WHERE is_default = 1 LIMIT 1
+    `).get();
+
+    if (defaultPrompt) {
+      console.log('[getBackgroundPrompt] Using default custom prompt');
+      return defaultPrompt.prompt;
+    }
+
+    // Final fallback: Use old in-memory variable
+    console.log('[getBackgroundPrompt] No custom prompts found, using in-memory fallback');
+    return backgroundPrompt;
+  } catch (error) {
+    console.error('[getBackgroundPrompt] Error fetching custom prompt:', error);
+    return backgroundPrompt; // Fallback to old variable
+  }
 }
 
 // GET /prompts/cutout - Retrieve cutout prompt
@@ -1375,6 +1409,81 @@ router.patch('/custom-prompts/:id', async (req, res) => {
       });
     }
 
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/settings/selected-prompt
+ * Save which custom prompt is currently selected
+ */
+router.post('/settings/selected-prompt', async (req, res) => {
+  try {
+    const { promptId } = req.body;
+
+    if (!promptId || typeof promptId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Prompt ID is required'
+      });
+    }
+
+    // Verify the prompt exists
+    const prompt = db.prepare(`
+      SELECT id FROM custom_prompts WHERE id = ?
+    `).get(promptId);
+
+    if (!prompt) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prompt not found'
+      });
+    }
+
+    // Save selected prompt ID to settings
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('selected_prompt_id', ?, datetime('now'))
+    `).run(promptId);
+
+    console.log('[Settings] Selected prompt updated:', promptId);
+
+    res.json({
+      success: true,
+      promptId
+    });
+
+  } catch (error) {
+    console.error('[Save Selected Prompt] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/settings/selected-prompt
+ * Get which custom prompt is currently selected
+ */
+router.get('/settings/selected-prompt', async (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'selected_prompt_id'
+    `).get();
+
+    const promptId = result?.value || null;
+
+    res.json({
+      success: true,
+      promptId
+    });
+
+  } catch (error) {
+    console.error('[Get Selected Prompt] Error:', error);
     res.status(500).json({
       success: false,
       error: error.message

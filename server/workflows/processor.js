@@ -552,12 +552,12 @@ async function processSeedreamWorkflow(jobId, job, db) {
     console.log(`[Processor] [${jobId}] Step 2/5: Seedream 4 Edit (AI Background Replacement)`);
 
     // Check for active background template
-    const activeTemplateId = getActiveBackgroundTemplate();
+    const activeTemplate = getActiveBackgroundTemplate();
     let templateAssets = null;
 
-    if (activeTemplateId) {
-      console.log(`[Processor] [${jobId}] Active template detected: ${activeTemplateId}`);
-      const template = getTemplateWithAssets(activeTemplateId, db);
+    if (activeTemplate) {
+      console.log(`[Processor] [${jobId}] Active template detected: "${activeTemplate.name}" (${activeTemplate.id})`);
+      const template = getTemplateWithAssets(activeTemplate.id, db);
 
       if (template && template.assets && template.assets.length > 0) {
         templateAssets = template.assets;
@@ -565,9 +565,9 @@ async function processSeedreamWorkflow(jobId, job, db) {
 
         // Store template ID in job for tracking
         db.prepare('UPDATE jobs SET background_template_id = ? WHERE id = ?')
-          .run(activeTemplateId, jobId);
+          .run(activeTemplate.id, jobId);
       } else {
-        console.warn(`[Processor] [${jobId}] Template ${activeTemplateId} has no assets, falling back to prompt`);
+        console.warn(`[Processor] [${jobId}] Template ${activeTemplate.id} has no assets, falling back to prompt`);
       }
     }
 
@@ -610,7 +610,7 @@ async function processSeedreamWorkflow(jobId, job, db) {
 
       // Update template usage count
       db.prepare('UPDATE background_templates SET used_count = used_count + 1 WHERE id = ?')
-        .run(activeTemplateId);
+        .run(activeTemplate.id);
 
     } else {
       // PROMPT MODE: Generate themed backgrounds with Seedream Edit
