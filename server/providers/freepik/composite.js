@@ -198,7 +198,8 @@ export class FreepikCompositeProvider {
       }
 
       const result = await response.json();
-      const taskId = result.data?.id || result.id;
+      const data = result.data || result;
+      const taskId = data.task_id || data.id;
 
       if (!taskId) {
         throw new Error(`No task ID returned: ${JSON.stringify(result)}`);
