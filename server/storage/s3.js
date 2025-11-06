@@ -8,8 +8,18 @@ import crypto from 'crypto';
  */
 class S3Storage {
   constructor(config = {}) {
-    this.bucket = config.bucket || process.env.S3_BUCKET || 'product-photos-ai-vws';
+    this.bucket = config.bucket || process.env.S3_BUCKET;
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
+
+    // Validate required configuration
+    if (!this.bucket) {
+      throw new Error(
+        'S3_BUCKET environment variable is required. ' +
+        'Please set S3_BUCKET in your .env file. ' +
+        'See .env.example for reference.'
+      );
+    }
+
     this.publicBase = config.publicBase || process.env.S3_PUBLIC_BASE ||
       `https://${this.bucket}.s3.${this.region}.amazonaws.com`;
     this.presignedUrlExpiry = config.presignedUrlExpiry ||

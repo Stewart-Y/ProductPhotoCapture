@@ -51,14 +51,31 @@ export function verifyHMAC(payload, signature, secret, algorithm = 'sha256') {
 export function verify3JMSWebhook(req, res, next) {
   const secret = process.env.TJMS_WEBHOOK_SECRET;
 
-  if (!secret) {
-    console.warn('[WebhookVerify] TJMS_WEBHOOK_SECRET not configured');
-    // In development, allow requests without verification
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('[WebhookVerify] ⚠️  Skipping verification (development mode)');
+  // In production, webhook secret is REQUIRED
+  if (process.env.NODE_ENV === 'production') {
+    if (!secret) {
+      console.error('[WebhookVerify] ❌ CRITICAL: TJMS_WEBHOOK_SECRET not configured in production');
+      return res.status(500).json({
+        error: 'Server misconfiguration: webhook secret not set in production'
+      });
+    }
+  }
+
+  // In development, allow skipping verification ONLY if explicitly enabled
+  if (process.env.NODE_ENV !== 'production' && process.env.SKIP_WEBHOOK_VERIFICATION === 'true') {
+    if (!secret) {
+      console.warn('[WebhookVerify] ⚠️  SKIP_WEBHOOK_VERIFICATION enabled - allowing unsigned webhook (development only)');
       return next();
     }
-    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
+
+  // If secret is not configured in development, reject the request
+  if (!secret) {
+    console.error('[WebhookVerify] ❌ TJMS_WEBHOOK_SECRET not configured');
+    return res.status(500).json({
+      error: 'Webhook secret not configured',
+      hint: 'Set TJMS_WEBHOOK_SECRET in .env file'
+    });
   }
 
   // Get signature from header (check multiple possible header names)
@@ -112,20 +129,49 @@ export function generateHMAC(payload, secret, algorithm = 'sha256') {
  *   app.use(express.json());
  *   app.post('/webhooks/3jms/images', verify3JMSWebhook, ...);
  */
+
+// Maximum webhook payload size: 10MB (prevent memory exhaustion attacks)
+const MAX_WEBHOOK_SIZE = 10 * 1024 * 1024;
+
 export function captureRawBody(req, res, next) {
-  if (req.path.startsWith('/webhooks')) {
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', chunk => {
-      data += chunk;
-    });
-    req.on('end', () => {
-      req.rawBody = data;
-      next();
-    });
-  } else {
-    next();
+  if (!req.path.startsWith('/webhooks')) {
+    return next();
   }
+
+  let data = '';
+  let size = 0;
+
+  req.setEncoding('utf8');
+
+  req.on('data', chunk => {
+    size += Buffer.byteLength(chunk, 'utf8');
+
+    // Reject if payload exceeds max size
+    if (size > MAX_WEBHOOK_SIZE) {
+      console.error(`[RawBody] ❌ Payload too large: ${size} bytes (max: ${MAX_WEBHOOK_SIZE})`);
+      req.removeAllListeners('data');
+      req.removeAllListeners('end');
+      req.destroy();
+      return res.status(413).json({
+        error: 'Payload too large',
+        maxSize: `${MAX_WEBHOOK_SIZE / 1024 / 1024}MB`
+      });
+    }
+
+    data += chunk;
+  });
+
+  req.on('error', (error) => {
+    console.error('[RawBody] ❌ Stream error:', error);
+    if (!res.headersSent) {
+      res.status(400).json({ error: 'Invalid request' });
+    }
+  });
+
+  req.on('end', () => {
+    req.rawBody = data;
+    next();
+  });
 }
 
 export default {

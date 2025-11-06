@@ -8,6 +8,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
+import { z } from 'zod';
 import db from '../db.js';
 import {
   createJob,
@@ -35,6 +36,31 @@ import {
 const router = express.Router();
 const s3 = getS3Storage();
 
+// =============================================================================
+// Validation Schemas
+// =============================================================================
+
+/**
+ * Webhook payload validation schema
+ * Validates incoming webhook requests from 3JMS
+ */
+const WebhookPayloadSchema = z.object({
+  event: z.string().optional(),
+  sku: z.string()
+    .min(1, 'SKU is required')
+    .max(100, 'SKU must be less than 100 characters')
+    .regex(/^[a-zA-Z0-9\-_]+$/, 'SKU must contain only alphanumeric characters, hyphens, and underscores'),
+  imageUrl: z.string()
+    .url('imageUrl must be a valid URL')
+    .startsWith('http', 'imageUrl must start with http:// or https://'),
+  sha256: z.string()
+    .length(64, 'sha256 must be exactly 64 characters')
+    .regex(/^[a-f0-9]{64}$/, 'sha256 must be a valid hex string'),
+  takenAt: z.string()
+    .datetime({ message: 'takenAt must be a valid ISO 8601 datetime' })
+    .optional()
+});
+
 // Multer middleware for file uploads
 const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }  // 10MB limit
@@ -45,15 +71,23 @@ const upload = multer({
 // =============================================================================
 router.post('/webhooks/3jms/images', verify3JMSWebhook, async (req, res) => {
   try {
-    const { event, sku, imageUrl, sha256, takenAt } = req.body;
+    // Validate webhook payload
+    const validationResult = WebhookPayloadSchema.safeParse(req.body);
 
-    // Validate required fields
-    if (!sku || !imageUrl || !sha256) {
+    if (!validationResult.success) {
+      const errors = validationResult.error.errors.map(err => ({
+        field: err.path.join('.'),
+        message: err.message
+      }));
+
+      console.error('[Webhook] Validation failed:', errors);
       return res.status(400).json({
-        error: 'Missing required fields',
-        required: ['sku', 'imageUrl', 'sha256']
+        error: 'Invalid webhook payload',
+        details: errors
       });
     }
+
+    const { event, sku, imageUrl, sha256, takenAt } = validationResult.data;
 
     // Check if SKU has reached max images limit
     const maxImages = parseInt(process.env.IMAGE_MAX_PER_SKU || '4', 10);
@@ -897,6 +931,72 @@ export function getWorkflowPreference() {
 }
 
 // =============================================================================
+// AI Compositor Preference Endpoints - Store and retrieve compositor setting
+// =============================================================================
+
+// GET /settings/compositor - Retrieve compositor preference
+router.get('/settings/compositor', (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'ai_compositor'
+    `).get();
+
+    const compositor = result?.value || process.env.AI_COMPOSITOR || 'freepik';
+
+    res.json({
+      compositor,
+      options: ['freepik', 'nanobanana']
+    });
+  } catch (error) {
+    console.error('[Get Compositor] Error:', error);
+    res.status(500).json({ error: 'Failed to get compositor preference', details: error.message });
+  }
+});
+
+// POST /settings/compositor - Save compositor preference
+router.post('/settings/compositor', (req, res) => {
+  try {
+    const { compositor } = req.body;
+
+    if (!compositor || !['freepik', 'nanobanana'].includes(compositor)) {
+      return res.status(400).json({
+        error: 'Invalid compositor',
+        validValues: ['freepik', 'nanobanana']
+      });
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('ai_compositor', ?, datetime('now'))
+    `).run(compositor);
+
+    console.log(`[Compositor] Updated preference to: ${compositor}`);
+
+    res.json({
+      success: true,
+      compositor,
+      message: 'Compositor preference saved successfully'
+    });
+  } catch (error) {
+    console.error('[Save Compositor] Error:', error);
+    res.status(500).json({ error: 'Failed to save compositor preference', details: error.message });
+  }
+});
+
+// Export function to access compositor preference from other modules
+export function getCompositorPreference() {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'ai_compositor'
+    `).get();
+    return result?.value || process.env.AI_COMPOSITOR || 'freepik';
+  } catch (error) {
+    console.error('[Get Compositor Preference] Error:', error);
+    return process.env.AI_COMPOSITOR || 'freepik'; // Safe fallback
+  }
+}
+
+// =============================================================================
 // Background Template Endpoints - Manage reusable background templates
 // =============================================================================
 
@@ -1015,6 +1115,104 @@ router.post('/templates', async (req, res) => {
   } catch (error) {
     console.error('[Create Template] Error:', error);
     res.status(500).json({ error: 'Failed to create template', details: error.message });
+  }
+});
+
+// POST /templates/upload - Upload custom background image
+router.post('/templates/upload', upload.single('image'), async (req, res) => {
+  try {
+    const { title } = req.body;
+    const imageFile = req.file;
+
+    if (!title || typeof title !== 'string') {
+      return res.status(400).json({ error: 'Template title is required' });
+    }
+
+    if (!imageFile) {
+      return res.status(400).json({ error: 'Image file is required' });
+    }
+
+    console.log('[Upload Template] Starting upload:', {
+      title,
+      filename: imageFile.originalname,
+      size: imageFile.size,
+      mimetype: imageFile.mimetype
+    });
+
+    // Generate unique template ID
+    const templateId = crypto.randomUUID();
+    const timestamp = Date.now();
+
+    // Upload to S3 with deterministic key
+    const s3Key = `templates/uploaded/${templateId}/background.jpg`;
+
+    console.log('[Upload Template] Uploading to S3:', s3Key);
+
+    await s3.uploadBuffer(s3Key, imageFile.buffer, imageFile.mimetype);
+
+    // Get presigned URL for access
+    const s3Url = await s3.getPresignedGetUrl(s3Key, 3600); // 1 hour
+    const urlExpiresAt = new Date(Date.now() + 3600 * 1000).toISOString();
+
+    // Get image dimensions using sharp (if available)
+    let width = 1024;
+    let height = 1024;
+    try {
+      const sharp = (await import('sharp')).default;
+      const metadata = await sharp(imageFile.buffer).metadata();
+      width = metadata.width || 1024;
+      height = metadata.height || 1024;
+    } catch (err) {
+      console.warn('[Upload Template] Could not read image dimensions:', err.message);
+    }
+
+    // Insert template into database
+    db.prepare(`
+      INSERT INTO background_templates (id, name, theme, prompt, status, created_at, updated_at, used_count)
+      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), 0)
+    `).run(templateId, title, 'uploaded', 'User uploaded background image', 'active');
+
+    // Insert asset into database
+    const assetResult = db.prepare(`
+      INSERT INTO template_assets (
+        template_id, variant, s3_key, s3_url, s3_url_expires_at,
+        width, height, format, size_bytes, created_at, selected
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)
+    `).run(
+      templateId,
+      1, // variant 1
+      s3Key,
+      s3Url,
+      urlExpiresAt,
+      width,
+      height,
+      imageFile.mimetype.split('/')[1] || 'jpeg',
+      imageFile.size,
+    );
+
+    console.log('[Upload Template] Template created:', {
+      templateId,
+      title,
+      s3Key,
+      assetId: assetResult.lastInsertRowid
+    });
+
+    res.status(201).json({
+      success: true,
+      templateId,
+      message: 'Background template uploaded successfully',
+      template: {
+        id: templateId,
+        name: title,
+        theme: 'uploaded',
+        status: 'active',
+        variant_count: 1
+      }
+    });
+
+  } catch (error) {
+    console.error('[Upload Template] Error:', error);
+    res.status(500).json({ error: 'Failed to upload template', details: error.message });
   }
 });
 

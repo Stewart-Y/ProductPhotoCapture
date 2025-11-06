@@ -12,10 +12,53 @@ import jobRoutes from './jobs/routes.js';
 import { captureRawBody } from './jobs/webhook-verify.js';
 import { startProcessor, stopProcessor } from './workflows/processor.js';
 
-dotenv.config();
+// Load environment-specific .env file
+const envFile = process.env.NODE_ENV === 'staging' ? '.env.staging' : '.env';
+dotenv.config({ path: envFile });
 
 const app = express();
-app.use(cors());
+
+// CORS Configuration with whitelist
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+
+// In development, allow common dev origins if no ALLOWED_ORIGINS is set
+const defaultDevOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000'
+];
+
+const corsOrigins = allowedOrigins.length > 0
+  ? allowedOrigins
+  : (process.env.NODE_ENV !== 'production' ? defaultDevOrigins : []);
+
+if (corsOrigins.length === 0) {
+  console.warn('[CORS] ⚠️  No ALLOWED_ORIGINS configured - CORS will block all cross-origin requests');
+  console.warn('[CORS] ⚠️  Set ALLOWED_ORIGINS in .env (e.g., ALLOWED_ORIGINS=http://localhost:5173,https://yourdomain.com)');
+}
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (corsOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] ❌ Blocked origin: ${origin}`);
+      callback(new Error(`Origin ${origin} not allowed by CORS policy`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  maxAge: 86400 // 24 hours
+}));
+
+console.log(`[CORS] Allowed origins: ${corsOrigins.join(', ')}`);
+
 
 // Capture raw body for webhook verification (BEFORE express.json())
 app.use(captureRawBody);
@@ -589,6 +632,22 @@ app.post('/api/tjms/push/:id', async (req, res) => {
   }
 });
 
+// Serve static client files
+const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+
+  // Handle client-side routing - send all non-API requests to index.html
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+      res.sendFile(path.join(clientDistPath, 'index.html'));
+    }
+  });
+  console.log('[Server] Serving client from:', clientDistPath);
+} else {
+  console.warn('[Server] Client dist folder not found at:', clientDistPath);
+}
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
@@ -615,3 +674,4 @@ process.on('SIGTERM', () => {
   stopProcessor();
   process.exit(0);
 });
+
