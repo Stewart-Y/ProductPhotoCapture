@@ -1,7 +1,15 @@
 import fetch from 'node-fetch';
 
-const TJMS_BASE_URL = 'https://3jms.vistawinespirits.com';
-const TJMS_API_TOKEN = 'f289f50fac528195af803f2932835c1992b305b0';
+// Load configuration from environment variables
+const TJMS_BASE_URL = process.env.TJMS_API_BASE_URL || 'https://3jms.vistawinespirits.com';
+const TJMS_API_TOKEN = process.env.TJMS_API_KEY;
+
+// Validate required environment variables
+if (!TJMS_API_TOKEN) {
+  console.error('[TJMS] ERROR: TJMS_API_KEY environment variable is not set');
+  console.error('[TJMS] Please add TJMS_API_KEY to your .env file');
+  throw new Error('TJMS_API_KEY is required. Check your .env file.');
+}
 
 /**
  * 3JMS API Client for Vista Wine & Spirits integration

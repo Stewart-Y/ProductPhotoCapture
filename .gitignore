@@ -1,4 +1,33 @@
+# Dependencies
 node_modules
+npm-debug.log*
+
+# Environment variables (CRITICAL - never commit these)
+**/.env
+**/.env.local
+**/.env.*.local
+.env
+.env.local
+server/.env
+client/.env
+
+# Database
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# OS files
 .DS_Store
 Thumbs.db
-**/.env
+*.tmp
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# PM2
+.pm2/
