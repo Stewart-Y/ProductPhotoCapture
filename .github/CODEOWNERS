@@ -1,0 +1,35 @@
+# ProductPhotoCapture Code Ownership
+# Each line is a file pattern followed by one or more owners.
+# More info: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*       @Stewart-Y
+
+# Server-side code
+/server/**                      @Stewart-Y
+
+# Database and migrations (require extra care)
+/server/migrations/**           @Stewart-Y
+/server/schema.sql              @Stewart-Y
+/server/db.js                   @Stewart-Y
+
+# Security-sensitive files
+/server/config/**               @Stewart-Y
+.env*                           @Stewart-Y
+/server/.env*                   @Stewart-Y
+
+# API integrations (require careful review)
+/server/tjms-client.js          @Stewart-Y
+/server/integrations/**         @Stewart-Y
+/server/providers/**            @Stewart-Y
+
+# Deployment and infrastructure
+/scripts/**                     @Stewart-Y
+Dockerfile*                     @Stewart-Y
+docker-compose*.yml             @Stewart-Y
+ecosystem*.config.js            @Stewart-Y
+.github/workflows/**            @Stewart-Y
+deploy*.sh                      @Stewart-Y
+
+# Client code
+/client/**                      @Stewart-Y
