@@ -51,7 +51,7 @@ export default function TestUploadModal({ open, onClose, onSuccess }: Props) {
       formData.append('file', selectedFile);
 
       // First, upload the image to get a temporary URL
-      const uploadResponse = await fetch('http://localhost:4000/api/upload-test-image', {
+      const uploadResponse = await fetch('/api/upload-test-image', {
         method: 'POST',
         body: formData,
       });
@@ -87,7 +87,7 @@ export default function TestUploadModal({ open, onClose, onSuccess }: Props) {
       const payloadString = JSON.stringify(payload);
 
       // POST to webhook endpoint (no signature needed in dev mode)
-      const webhookResponse = await fetch('http://localhost:4000/api/webhooks/3jms/images', {
+      const webhookResponse = await fetch('/api/webhooks/3jms/images', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

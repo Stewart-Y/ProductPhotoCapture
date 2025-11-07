@@ -18,11 +18,32 @@ import { JobStatus, ErrorCode } from '../jobs/state-machine.js';
 import { getSegmentProvider, getBackgroundProvider, getSeedreamProvider } from '../providers/index.js';
 import { compositeImage } from './composite.js';
 import { FreepikCompositeProvider } from '../providers/freepik/composite.js';
+import { NanoBananaCompositeProvider } from '../providers/nanobanana/composite.js';
 import { generateDerivatives, batchGenerateDerivatives } from './derivatives.js';
 import { buildManifest } from './manifest.js';
-import { getBackgroundPrompt, getWorkflowPreference, getActiveBackgroundTemplate } from '../jobs/routes.js';
+import { getBackgroundPrompt, getWorkflowPreference, getActiveBackgroundTemplate, getCompositorPreference } from '../jobs/routes.js';
 import { getTemplateWithAssets } from './template-generator.js';
 import db from '../db.js';
+
+/**
+ * Get AI compositor instance based on configuration
+ * Reads from database settings first, then falls back to environment variable
+ */
+function getCompositor() {
+  const compositor = getCompositorPreference();
+
+  if (compositor === 'nanobanana') {
+    console.log('[Processor] Using Nano Banana compositor (better text preservation)');
+    return new NanoBananaCompositeProvider({
+      apiKey: process.env.NANOBANANA_API_KEY
+    });
+  }
+
+  console.log('[Processor] Using Freepik Seedream compositor');
+  return new FreepikCompositeProvider({
+    apiKey: process.env.FREEPIK_API_KEY
+  });
+}
 
 /**
  * Job Processor Configuration
@@ -316,9 +337,10 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
       jobId
     );
 
-    // Step 3: AI-Powered Compositing (Freepik Seedream)
+    // Step 3: AI-Powered Compositing
     const step3Start = Date.now();
-    console.log(`[Processor] [${jobId}] Step 3/7: AI-Powered Compositing (Freepik Seedream)`);
+    const compositorName = process.env.AI_COMPOSITOR || 'freepik';
+    console.log(`[Processor] [${jobId}] Step 3/7: AI-Powered Compositing (${compositorName})`);
 
     job = getJob(jobId); // Refresh job data
 
@@ -333,10 +355,8 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
       throw new Error('No backgrounds available');
     }
 
-    // Initialize Freepik AI Compositor
-    const aiCompositor = new FreepikCompositeProvider({
-      apiKey: process.env.FREEPIK_API_KEY
-    });
+    // Initialize AI Compositor (Freepik Seedream or Nano Banana)
+    const aiCompositor = getCompositor();
 
     // AI composite each background
     const composites = [];

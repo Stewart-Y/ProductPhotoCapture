@@ -709,7 +709,7 @@ const BackgroundImage: React.FC<BackgroundImageProps> = ({ s3Key, index }) => {
         setError(false);
 
         // Call backend to get presigned URL for this specific S3 key
-        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        const response = await fetch(`/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
         if (!response.ok) throw new Error('Failed to fetch presigned URL');
 
         const data = await response.json();
@@ -791,7 +791,7 @@ const CompositeImage: React.FC<CompositeImageProps> = ({ s3Key, index }) => {
         setError(false);
 
         // Call backend to get presigned URL for this specific S3 key
-        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        const response = await fetch(`/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
         if (!response.ok) throw new Error('Failed to fetch presigned URL');
 
         const data = await response.json();
@@ -876,7 +876,7 @@ const DerivativeImage: React.FC<DerivativeImageProps> = ({ s3Key }) => {
         setError(false);
 
         // Call backend to get presigned URL for this specific S3 key
-        const response = await fetch(`http://localhost:4000/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
+        const response = await fetch(`/api/s3/presign?key=${encodeURIComponent(s3Key)}`);
         if (!response.ok) throw new Error('Failed to fetch presigned URL');
 
         const data = await response.json();

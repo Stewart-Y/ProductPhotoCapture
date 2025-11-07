@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui';
-import { Sparkles, Zap, Target, Plus, X, Trash2 } from 'lucide-react';
+import { Sparkles, Zap, Target, Plus, X, Trash2, Cpu } from 'lucide-react';
 
 interface CustomPrompt {
   id: string;
@@ -27,22 +27,27 @@ export const Settings: React.FC = () => {
   const [, setIsSavingWorkflow] = useState(false);
   const [workflowSuccess, setWorkflowSuccess] = useState(false);
 
-  // Load custom prompts and workflow preference on mount
+  // Compositor preference state
+  const [compositor, setCompositor] = useState<'freepik' | 'nanobanana'>('freepik');
+  const [compositorSuccess, setCompositorSuccess] = useState(false);
+
+  // Load settings on mount
   useEffect(() => {
     fetchCustomPrompts();
     fetchWorkflowPreference();
+    fetchCompositor();
   }, []);
 
   const fetchCustomPrompts = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/custom-prompts');
+      const response = await fetch('/api/custom-prompts');
       const data = await response.json();
 
       if (data.success) {
         setCustomPrompts(data.prompts);
 
         // Fetch the currently selected prompt ID from settings
-        const selectedResponse = await fetch('http://localhost:4000/api/settings/selected-prompt');
+        const selectedResponse = await fetch('/api/settings/selected-prompt');
         const selectedData = await selectedResponse.json();
 
         if (selectedData.success && selectedData.promptId) {
@@ -69,13 +74,25 @@ export const Settings: React.FC = () => {
 
   const fetchWorkflowPreference = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/settings/workflow');
+      const response = await fetch('/api/settings/workflow');
       if (response.ok) {
         const data = await response.json();
         setWorkflowPreference(data.workflow);
       }
     } catch (error) {
       console.error('Error fetching workflow preference:', error);
+    }
+  };
+
+  const fetchCompositor = async () => {
+    try {
+      const response = await fetch('/api/settings/compositor');
+      if (response.ok) {
+        const data = await response.json();
+        setCompositor(data.compositor || 'freepik');
+      }
+    } catch (error) {
+      console.error('Error fetching compositor:', error);
     }
   };
 
@@ -86,7 +103,7 @@ export const Settings: React.FC = () => {
     setPromptSuccess(false);
 
     try {
-      const response = await fetch('http://localhost:4000/api/custom-prompts', {
+      const response = await fetch('/api/custom-prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -117,7 +134,7 @@ export const Settings: React.FC = () => {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
 
     try {
-      const response = await fetch(`http://localhost:4000/api/custom-prompts/${promptId}`, {
+      const response = await fetch(`/api/custom-prompts/${promptId}`, {
         method: 'DELETE'
       });
 
@@ -141,12 +158,11 @@ export const Settings: React.FC = () => {
 
     // Save the selected prompt ID to the backend
     try {
-      await fetch('http://localhost:4000/api/settings/selected-prompt', {
+      await fetch('/api/settings/selected-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ promptId: newPromptId })
       });
-      console.log('Selected prompt saved:', newPromptId);
     } catch (error) {
       console.error('Error saving selected prompt:', error);
     }
@@ -157,7 +173,7 @@ export const Settings: React.FC = () => {
     setWorkflowSuccess(false);
 
     try {
-      const response = await fetch('http://localhost:4000/api/settings/workflow', {
+      const response = await fetch('/api/settings/workflow', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workflow: newWorkflow })
@@ -175,190 +191,335 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const handleCompositorChange = async (newCompositor: 'freepik' | 'nanobanana') => {
+    setCompositorSuccess(false);
+
+    try {
+      const response = await fetch('/api/settings/compositor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ compositor: newCompositor })
+      });
+
+      if (response.ok) {
+        setCompositor(newCompositor);
+        setCompositorSuccess(true);
+        setTimeout(() => setCompositorSuccess(false), 3000);
+      }
+    } catch (error) {
+      console.error('Error saving compositor:', error);
+    }
+  };
+
   const selectedPrompt = customPrompts.find(p => p.id === selectedPromptId);
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-1">
-          Configure AI prompts and workflow preferences
+    <div className="p-6 max-w-6xl mx-auto">
+      {/* Page Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-2">Settings</h1>
+        <p className="text-muted-foreground">
+          Configure AI models, background prompts, and workflow preferences
         </p>
       </div>
 
-      {/* Custom Background Prompts Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
-            <CardTitle>Background Prompts</CardTitle>
-          </div>
-          <p className="text-sm text-muted-foreground mt-2">
-            Create and manage custom prompts for background generation. Select a prompt from the dropdown or create a new one.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Dropdown and Add Button */}
-          <div className="flex gap-2">
-            <select
-              value={selectedPromptId}
-              onChange={(e) => handlePromptChange(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              {customPrompts.length === 0 && (
-                <option value="">No prompts available</option>
-              )}
-              {customPrompts.map(prompt => (
-                <option key={prompt.id} value={prompt.id}>
-                  {prompt.title} {prompt.is_default ? '(Default)' : ''}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => setShowAddPromptModal(true)}
-              className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:bg-primary/90 flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Add Prompt
-            </button>
-          </div>
-
-          {/* Selected Prompt Display */}
-          {selectedPrompt && (
-            <div className="bg-muted/50 rounded-md p-4 border border-border space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-foreground">{selectedPrompt.title}</p>
-                {!selectedPrompt.is_default && (
-                  <button
-                    onClick={() => handleDeletePrompt(selectedPrompt.id)}
-                    className="text-red-500 hover:text-red-700 transition"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column */}
+        <div className="space-y-6">
+          {/* AI Compositor Selection */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-primary" />
+                <CardTitle>AI Compositor Model</CardTitle>
               </div>
-              <p className="text-sm text-muted-foreground">{selectedPrompt.prompt}</p>
-              <p className="text-xs text-muted-foreground">
-                Used {selectedPrompt.used_count} time(s) • Created {new Date(selectedPrompt.created_at).toLocaleDateString()}
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Choose the AI model used for compositing products onto backgrounds
               </p>
-            </div>
-          )}
 
-          {promptSuccess && (
-            <p className="text-xs text-green-600">Prompt saved successfully!</p>
-          )}
+              {/* Compositor Options */}
+              <div className="space-y-3">
+                {/* Freepik Seedream */}
+                <div
+                  onClick={() => handleCompositorChange('freepik')}
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    compositor === 'freepik'
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold text-foreground">Freepik Seedream 4</h4>
+                    {compositor === 'freepik' && (
+                      <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    ByteDance's Seedream 4 Edit API - Best for high-resolution output
+                  </p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>4K resolution output</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>Superior overall detail</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-amber-600">⚠</span>
+                      <span>Text may be distorted</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>💰</span>
+                      <span>$0.02 per image</span>
+                    </div>
+                  </div>
+                </div>
 
-          {/* Info Box */}
-          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
-              How Background Prompts Work
-            </h4>
-            <ul className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
-              <li>• Create custom prompts with descriptive names for easy selection</li>
-              <li>• Prompts describe the background scene/theme for AI generation</li>
-              <li>• Default prompt is provided but you can create as many as needed</li>
-              <li>• Selected prompt will be used for new jobs (doesn't affect existing jobs)</li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Workflow Selection Card */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-primary" />
-            <CardTitle>Background Generation Workflow</CardTitle>
-          </div>
-          <p className="text-sm text-muted-foreground mt-2">
-            Choose how background images are generated. This setting applies to all new jobs.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Option A: Cutout + Composite */}
-          <div
-            onClick={() => handleSaveWorkflow('cutout_composite')}
-            className={`border rounded-lg p-4 cursor-pointer transition-all ${
-              workflowPreference === 'cutout_composite'
-                ? 'border-primary bg-primary/5 ring-2 ring-primary'
-                : 'border-border hover:border-primary/50'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h3 className="font-semibold text-foreground flex items-center gap-2">
-                  <Target className="w-4 h-4" />
-                  Cutout + Composite (Precise)
-                  {workflowPreference === 'cutout_composite' && (
-                    <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">Current</span>
-                  )}
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  3-step process: Remove background → Generate empty backgrounds → Composite cutout with drop shadow
-                </p>
-                <ul className="text-xs text-muted-foreground mt-2 space-y-1">
-                  <li>✓ 100% pixel-perfect product preservation</li>
-                  <li>✓ Professional drop shadows and centering control</li>
-                  <li>✓ Clean separation of product and background</li>
-                  <li>• Cost: $0.02 (cutout) + $0.10-0.20 (backgrounds) = $0.12-0.22</li>
-                  <li>• Processing time: ~40-60 seconds</li>
-                </ul>
+                {/* Nano Banana */}
+                <div
+                  onClick={() => handleCompositorChange('nanobanana')}
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    compositor === 'nanobanana'
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold text-foreground">Nano Banana (Gemini 2.5)</h4>
+                    {compositor === 'nanobanana' && (
+                      <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Google's Gemini 2.5 Flash Image - Best for text/label preservation
+                  </p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>Cleaner, legible text</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>Realistic product placement</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>2048px resolution</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>💰</span>
+                      <span>$0.03 per image</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Option B: Seedream 4 Edit */}
-          <div
-            onClick={() => handleSaveWorkflow('seedream_edit')}
-            className={`border rounded-lg p-4 cursor-pointer transition-all ${
-              workflowPreference === 'seedream_edit'
-                ? 'border-primary bg-primary/5 ring-2 ring-primary'
-                : 'border-border hover:border-primary/50'
-            }`}
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h3 className="font-semibold text-foreground flex items-center gap-2">
-                  <Zap className="w-4 h-4" />
-                  AI Edit (Fast)
-                  {workflowPreference === 'seedream_edit' && (
-                    <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">Current</span>
-                  )}
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Single-step process: AI replaces background while preserving product in one operation
+              {compositorSuccess && (
+                <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
+                  <p className="text-xs text-green-800 dark:text-green-200">
+                    ✓ Compositor changed successfully! Will apply to new jobs.
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
+                <p className="text-xs text-blue-800 dark:text-blue-200">
+                  <strong>Tip:</strong> Use Nano Banana for products with labels/text. Use Seedream for maximum detail.
                 </p>
-                <ul className="text-xs text-muted-foreground mt-2 space-y-1">
-                  <li>✓ Fast single-step AI editing</li>
-                  <li>✓ Natural lighting and shadows automatically applied</li>
-                  <li>✓ No compositing artifacts</li>
-                  <li>• Cost: ~$0.16 per job (verify pricing)</li>
-                  <li>• Processing time: ~20-30 seconds</li>
-                  <li>⚠️ ~95% product preservation (AI may adjust lighting/edges)</li>
-                </ul>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          {workflowSuccess && (
-            <p className="text-xs text-green-600">Workflow preference saved successfully!</p>
-          )}
+          {/* Background Workflow */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-primary" />
+                <CardTitle>Background Workflow</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Choose how backgrounds are generated and composited
+              </p>
 
-          {/* Info Box */}
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-lg p-4">
-            <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-2">
-              Important Notes
-            </h4>
-            <ul className="text-xs text-amber-800 dark:text-amber-200 space-y-1">
-              <li>• Changes apply to NEW jobs only - existing jobs are unaffected</li>
-              <li>• Both workflows use Freepik API with different endpoints</li>
-              <li>• You can switch workflows at any time</li>
-              <li>• Seedream Edit is experimental - quality may vary by product type</li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+              <div className="space-y-3">
+                {/* Cutout + Composite */}
+                <div
+                  onClick={() => handleSaveWorkflow('cutout_composite')}
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    workflowPreference === 'cutout_composite'
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Target className="w-4 h-4" />
+                      <h4 className="font-semibold text-foreground">Cutout + Composite</h4>
+                    </div>
+                    {workflowPreference === 'cutout_composite' && (
+                      <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Precise 3-step process with pixel-perfect preservation
+                  </p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>100% product preservation</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>Professional drop shadows</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>⏱</span>
+                      <span>~40-60 seconds</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* AI Edit */}
+                <div
+                  onClick={() => handleSaveWorkflow('seedream_edit')}
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    workflowPreference === 'seedream_edit'
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4" />
+                      <h4 className="font-semibold text-foreground">AI Edit (Fast)</h4>
+                    </div>
+                    {workflowPreference === 'seedream_edit' && (
+                      <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Single-step AI background replacement
+                  </p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-green-600">✓</span>
+                      <span>Natural lighting & shadows</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="text-amber-600">⚠</span>
+                      <span>~95% product preservation</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>⏱</span>
+                      <span>~20-30 seconds</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {workflowSuccess && (
+                <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
+                  <p className="text-xs text-green-800 dark:text-green-200">
+                    ✓ Workflow preference saved!
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-6">
+          {/* Background Prompts */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary" />
+                <CardTitle>Background Prompts</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Create and manage custom prompts for background generation
+              </p>
+
+              {/* Dropdown and Add Button */}
+              <div className="flex gap-2">
+                <select
+                  value={selectedPromptId}
+                  onChange={(e) => handlePromptChange(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {customPrompts.length === 0 && (
+                    <option value="">No prompts available</option>
+                  )}
+                  {customPrompts.map(prompt => (
+                    <option key={prompt.id} value={prompt.id}>
+                      {prompt.title} {prompt.is_default ? '(Default)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setShowAddPromptModal(true)}
+                  className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:bg-primary/90 flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+
+              {/* Selected Prompt Display */}
+              {selectedPrompt && (
+                <div className="bg-muted/50 rounded-md p-4 border border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-foreground">{selectedPrompt.title}</p>
+                    {!selectedPrompt.is_default && (
+                      <button
+                        onClick={() => handleDeletePrompt(selectedPrompt.id)}
+                        className="text-red-500 hover:text-red-700 transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{selectedPrompt.prompt}</p>
+                  <p className="text-xs text-muted-foreground pt-2 border-t border-border">
+                    Used {selectedPrompt.used_count}× • {new Date(selectedPrompt.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              )}
+
+              {promptSuccess && (
+                <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
+                  <p className="text-xs text-green-800 dark:text-green-200">
+                    ✓ Prompt saved successfully!
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-lg p-3">
+                <p className="text-xs text-blue-800 dark:text-blue-200 leading-relaxed">
+                  <strong>How it works:</strong> Describe the scene, lighting, and atmosphere for AI background generation. Selected prompt applies to new jobs.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {/* Add Prompt Modal */}
       {showAddPromptModal && (

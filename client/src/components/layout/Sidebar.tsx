@@ -1,12 +1,14 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
-import { BarChart3, Briefcase, Settings, Activity, Image } from 'lucide-react';
+import { BarChart3, Briefcase, Settings, Activity, Image, Webhook, ShoppingCart } from 'lucide-react';
 
 const LINKS = [
   { href: '/', label: 'Dashboard', icon: BarChart3 },
   { href: '/jobs', label: 'Jobs', icon: Briefcase },
   { href: '/templates', label: 'Templates', icon: Image },
+  { href: '/webhook', label: '3JMS Webhook', icon: Webhook },
+  { href: '/shopify', label: 'Shopify', icon: ShoppingCart },
 ];
 
 export const Sidebar: React.FC = () => {

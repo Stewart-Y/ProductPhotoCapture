@@ -56,7 +56,7 @@ interface CreatePromptForm {
   prompt: string;
 }
 
-const API_BASE = 'http://localhost:4000/api';
+const API_BASE = '/api';
 
 export default function BackgroundTemplates() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -66,6 +66,7 @@ export default function BackgroundTemplates() {
   const [creating, setCreating] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +80,13 @@ export default function BackgroundTemplates() {
     title: '',
     prompt: ''
   });
+
+  const [uploadForm, setUploadForm] = useState({
+    title: '',
+    file: null as File | null
+  });
+
+  const [uploading, setUploading] = useState(false);
 
   // Fetch templates and prompts on mount
   useEffect(() => {
@@ -272,6 +280,44 @@ export default function BackgroundTemplates() {
     }
   };
 
+  const handleUploadTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!uploadForm.file) {
+      setError('Please select an image file');
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('title', uploadForm.title);
+      formData.append('image', uploadForm.file);
+
+      const response = await fetch(`${API_BASE}/templates/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowUploadModal(false);
+        setUploadForm({ title: '', file: null });
+        fetchTemplates(); // Refresh list
+      } else {
+        setError(data.error || 'Failed to upload template');
+      }
+    } catch (err) {
+      console.error('Failed to upload template:', err);
+      setError('Failed to upload template');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
       <div className="max-w-7xl mx-auto">
@@ -283,12 +329,20 @@ export default function BackgroundTemplates() {
               Create and manage reusable background templates for consistent product compositing
             </p>
           </div>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:opacity-90 transition"
-          >
-            + Create Template
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:opacity-90 transition"
+            >
+              Upload Background
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="bg-primary text-primary-foreground px-4 py-2 rounded-md hover:opacity-90 transition"
+            >
+              + Create Template
+            </button>
+          </div>
         </div>
 
         {/* Error Message */}
@@ -539,6 +593,87 @@ export default function BackgroundTemplates() {
                     disabled={creating}
                   >
                     {creating ? 'Saving...' : 'Save Prompt'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Background Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-900 border-2 border-slate-700 rounded-lg p-6 w-full max-w-md shadow-2xl">
+              <h2 className="text-2xl font-bold mb-4 text-foreground">Upload Background Image</h2>
+
+              <form onSubmit={handleUploadTemplate}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-foreground">Template Title</label>
+                    <input
+                      type="text"
+                      value={uploadForm.title}
+                      onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
+                      className="w-full bg-background text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="e.g., White Studio Background"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-foreground">Background Image</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        setUploadForm({ ...uploadForm, file });
+                      }}
+                      className="w-full bg-background text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:opacity-90"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Upload a background image to use as a template (JPG, PNG, etc.)
+                    </p>
+                  </div>
+
+                  {uploadForm.file && (
+                    <div className="border border-border rounded-md p-3 bg-background">
+                      <p className="text-sm text-foreground">
+                        <strong>Selected:</strong> {uploadForm.file.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Size: {(uploadForm.file.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {error && (
+                  <div className="mt-4 bg-red-900/30 border border-red-600 rounded-lg p-3">
+                    <p className="text-sm text-red-200">{error}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUploadModal(false);
+                      setUploadForm({ title: '', file: null });
+                      setError(null);
+                    }}
+                    className="flex-1 bg-secondary text-secondary-foreground px-4 py-2 rounded-md hover:opacity-90 transition font-medium"
+                    disabled={uploading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:opacity-90 transition disabled:opacity-50 font-medium"
+                    disabled={uploading}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload Template'}
                   </button>
                 </div>
               </form>
