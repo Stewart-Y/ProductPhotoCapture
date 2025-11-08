@@ -90,43 +90,44 @@ ssh -i "$EC2_KEY_PATH" "$EC2_USER@$EC2_IP" << 'ENDSSH'
 ENDSSH
 echo -e "${GREEN}✓ Client built${NC}"
 
-echo -e "${YELLOW}[7/8] Restarting server (PM2)...${NC}"
+echo -e "${YELLOW}[7/8] Updating PM2 configuration...${NC}"
 ssh -i "$EC2_KEY_PATH" "$EC2_USER@$EC2_IP" << 'ENDSSH'
-  # Restart server
-  pm2 restart product-photo-server || pm2 start /home/ubuntu/ProductPhotoCapture/server/server.js --name product-photo-server
+  cd /home/ubuntu/ProductPhotoCapture
+
+  # Stop existing processes if they exist
+  pm2 delete prod-server prod-client 2>/dev/null || true
+
+  # Start using ecosystem config
+  pm2 start ecosystem.config.js --only prod-server,prod-client
 
   # Save PM2 process list
   pm2 save
 
-  echo "Waiting for server to start..."
+  echo "Waiting for services to start..."
   sleep 3
 
-  # Check server status
+  # Check status
   pm2 list
 ENDSSH
-echo -e "${GREEN}✓ Server restarted${NC}"
+echo -e "${GREEN}✓ Services restarted${NC}"
 
-echo -e "${YELLOW}[8/8] Restarting client (PM2)...${NC}"
+echo -e "${YELLOW}[8/8] Verifying deployment...${NC}"
 ssh -i "$EC2_KEY_PATH" "$EC2_USER@$EC2_IP" << 'ENDSSH'
-  # Restart client
-  pm2 restart product-photo-client || pm2 start npx --name product-photo-client -- serve /home/ubuntu/ProductPhotoCapture/client/dist -l 5173
+  # Test if server is responding
+  curl -s http://localhost:4000/api/health || echo "Server health check failed"
 
-  # Save PM2 process list
-  pm2 save
+  # Test if client is serving
+  curl -s http://localhost:5173 | head -n 5 || echo "Client serving check failed"
 
-  echo "Waiting for client to start..."
-  sleep 2
-
-  # Show final status
   echo ""
   echo "=== PM2 Process Status ==="
   pm2 list
 
   echo ""
   echo "=== Recent Server Logs ==="
-  pm2 logs product-photo-server --lines 10 --nostream
+  pm2 logs prod-server --lines 10 --nostream
 ENDSSH
-echo -e "${GREEN}✓ Client restarted${NC}"
+echo -e "${GREEN}✓ Deployment verified${NC}"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
