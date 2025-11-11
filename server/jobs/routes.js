@@ -1287,7 +1287,7 @@ router.post('/templates', async (req, res) => {
 
     // Insert template record as 'generating'
     db.prepare(`
-      INSERT INTO background_templates (id, name, theme, custom_prompt, status, variant_count, created_at)
+      INSERT INTO background_templates (id, name, theme, prompt, status, variant_count, created_at)
       VALUES (?, ?, ?, ?, 'generating', ?, datetime('now'))
     `).run(templateId, name, 'custom', customPrompt, variantCount || 3);
 
