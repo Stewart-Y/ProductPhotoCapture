@@ -69,7 +69,7 @@ export async function generateBackgroundTemplate({
       variantPromises.push(
         generateTemplateVariant({
           provider,
-          templateId,
+          templateId: finalTemplateId,
           variant,
           theme,
           customPrompt,
@@ -85,7 +85,7 @@ export async function generateBackgroundTemplate({
     const failedVariants = variantResults.filter(r => r.status === 'rejected' || !r.value.success);
 
     console.log('[TemplateGenerator] Variant generation complete', {
-      templateId,
+      templateId: finalTemplateId,
       total: variantCount,
       successful: successfulVariants.length,
       failed: failedVariants.length
@@ -97,13 +97,13 @@ export async function generateBackgroundTemplate({
         UPDATE background_templates
         SET status = 'active', updated_at = datetime('now')
         WHERE id = ?
-      `).run(templateId);
+      `).run(finalTemplateId);
 
       const duration = Date.now() - startTime;
       const totalCost = successfulVariants.reduce((sum, r) => sum + (r.value.cost || 0), 0);
 
       console.log('[TemplateGenerator] Template generation successful', {
-        templateId,
+        templateId: finalTemplateId,
         name,
         variants: successfulVariants.length,
         duration: `${duration}ms`,
@@ -112,7 +112,7 @@ export async function generateBackgroundTemplate({
 
       return {
         success: true,
-        templateId,
+        templateId: finalTemplateId,
         name,
         variantsGenerated: successfulVariants.length,
         variants: successfulVariants.map(r => r.value),
@@ -125,7 +125,7 @@ export async function generateBackgroundTemplate({
         UPDATE background_templates
         SET status = 'archived', updated_at = datetime('now')
         WHERE id = ?
-      `).run(templateId);
+      `).run(finalTemplateId);
 
       throw new Error('All variant generations failed');
     }
@@ -134,7 +134,7 @@ export async function generateBackgroundTemplate({
     const duration = Date.now() - startTime;
 
     console.error('[TemplateGenerator] Template generation failed', {
-      templateId,
+      templateId: finalTemplateId,
       name,
       error: error.message,
       duration: `${duration}ms`
@@ -145,12 +145,12 @@ export async function generateBackgroundTemplate({
       UPDATE background_templates
       SET status = 'archived', updated_at = datetime('now')
       WHERE id = ?
-    `).run(templateId);
+    `).run(finalTemplateId);
 
     return {
       success: false,
       error: error.message,
-      templateId,
+      templateId: finalTemplateId,
       duration
     };
   }
