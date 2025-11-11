@@ -1282,27 +1282,34 @@ router.post('/templates', async (req, res) => {
 
     console.log('[Create Template] Starting generation:', { name, customPrompt: customPrompt.substring(0, 50) + '...', variantCount });
 
+    // Create template ID immediately
+    const templateId = `tmpl-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    // Insert template record as 'generating'
+    db.prepare(`
+      INSERT INTO background_templates (id, name, theme, custom_prompt, status, variant_count, created_at)
+      VALUES (?, ?, ?, ?, 'generating', ?, datetime('now'))
+    `).run(templateId, name, 'custom', customPrompt, variantCount || 3);
+
     // Trigger async generation (don't await - let it run in background)
-    const result = await generateBackgroundTemplate({
+    generateBackgroundTemplate({
+      templateId,
       name,
       theme: 'custom',
       customPrompt,
       variantCount: variantCount || 3,
       db
+    }).catch(error => {
+      console.error(`[Create Template] Background generation failed for ${templateId}:`, error);
+      // Update template status to failed
+      db.prepare(`UPDATE background_templates SET status = 'failed', updated_at = datetime('now') WHERE id = ?`).run(templateId);
     });
 
-    if (!result.success) {
-      return res.status(500).json({
-        error: 'Template generation failed',
-        details: result.error
-      });
-    }
-
+    // Respond immediately
     res.status(201).json({
       success: true,
-      templateId: result.templateId,
-      message: 'Template created and generation started',
-      result
+      templateId,
+      message: 'Template created and generation started in background'
     });
 
   } catch (error) {
