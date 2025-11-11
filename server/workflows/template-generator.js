@@ -330,7 +330,7 @@ export async function regenerateTemplateVariants({
 export function getTemplateWithAssets(finalTemplateId, db, onlySelected = false) {
   const template = db.prepare(`
     SELECT * FROM background_templates WHERE id = ?
-  `).get(templateId);
+  `).get(finalTemplateId);
 
   if (!template) {
     return null;
@@ -341,7 +341,7 @@ export function getTemplateWithAssets(finalTemplateId, db, onlySelected = false)
     ? `SELECT * FROM template_assets WHERE template_id = ? AND selected = 1 ORDER BY variant ASC`
     : `SELECT * FROM template_assets WHERE template_id = ? ORDER BY variant ASC`;
 
-  const assets = db.prepare(query).all(templateId);
+  const assets = db.prepare(query).all(finalTemplateId);
 
   return {
     ...template,
