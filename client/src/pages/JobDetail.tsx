@@ -76,6 +76,8 @@ export const JobDetail: React.FC = () => {
     manifest_ms: job.manifest_ms || null,
     img_sha256: job.img_sha256 || '',
     workflow_type: job.workflow_type || 'cutout_composite',
+    provider_metadata: job.provider_metadata || null,
+    metadata: job.metadata || null,
   };
 
   const isSeedreamWorkflow = safeJob.workflow_type === 'seedream_edit';
