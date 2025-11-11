@@ -1287,9 +1287,9 @@ router.post('/templates', async (req, res) => {
 
     // Insert template record as 'generating'
     db.prepare(`
-      INSERT INTO background_templates (id, name, theme, prompt, status, variant_count, created_at)
-      VALUES (?, ?, ?, ?, 'generating', ?, datetime('now'))
-    `).run(templateId, name, 'custom', customPrompt, variantCount || 3);
+      INSERT INTO background_templates (id, name, theme, prompt, status, created_at)
+      VALUES (?, ?, ?, ?, 'generating', datetime('now'))
+    `).run(templateId, name, 'custom', customPrompt);
 
     // Trigger async generation (don't await - let it run in background)
     generateBackgroundTemplate({
