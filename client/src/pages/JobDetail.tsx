@@ -90,7 +90,7 @@ export const JobDetail: React.FC = () => {
             Job ID: <span className="font-mono">{safeJob.id}</span>
           </p>
           {/* Workflow Badge */}
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             {isSeedreamWorkflow ? (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
                 ⚡ Seedream Edit (Fast)
@@ -98,6 +98,17 @@ export const JobDetail: React.FC = () => {
             ) : (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                 ✂️ Cutout + Composite (Precise)
+              </span>
+            )}
+            {/* Compositor Badge */}
+            {safeJob.provider_metadata?.compositor && (
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                safeJob.provider_metadata.compositor === 'nanobanana'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                  : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+              }`}>
+                {safeJob.provider_metadata.compositor === 'nanobanana' && '🍌 Nano Banana'}
+                {safeJob.provider_metadata.compositor === 'freepik' && '✨ Freepik Seedream'}
               </span>
             )}
           </div>
@@ -349,6 +360,30 @@ export const JobDetail: React.FC = () => {
                 <p className="text-sm text-muted-foreground">Theme</p>
                 <p className="font-semibold">{job.theme}</p>
               </div>
+              {job.metadata && typeof job.metadata === 'object' && 'combinedFlow' in job.metadata && job.metadata.combinedFlow && (
+                <div>
+                  <p className="text-sm text-muted-foreground">Composite Flow</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      {(() => {
+                        // Detect which combined flow is active based on metadata
+                        if ('ideogramDuration' in job.metadata) {
+                          return 'Sharp + Ideogram';
+                        } else if ('seedreamDuration' in job.metadata) {
+                          return 'Sharp + Seedream';
+                        } else if ('nanobananaDuration' in job.metadata) {
+                          return 'Sharp + Nano Banana';
+                        } else {
+                          return 'Sharp + AI Enhancement';
+                        }
+                      })()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Pixel-perfect composite + AI lighting
+                  </p>
+                </div>
+              )}
               <div>
                 <p className="text-sm text-muted-foreground">Image SHA256</p>
                 <p className="font-mono text-xs break-all">{job.img_sha256}</p>

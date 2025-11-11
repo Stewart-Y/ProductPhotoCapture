@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS custom_prompts (
   used_count INTEGER DEFAULT 0
 );
 
--- Insert default custom prompt
-INSERT INTO custom_prompts (id, title, prompt, is_default, created_at)
+-- Insert default custom prompt (only if not exists)
+INSERT OR IGNORE INTO custom_prompts (id, title, prompt, is_default, created_at)
 VALUES
   ('prompt_default', 'Custom Prompt', 'Professional product photography empty background scene, vacant center foreground space ready for placement, soft gradient backdrop fading from light to slightly darker tone, clean smooth surface in sharp focus. Studio lighting setup with key and fill lights illuminating empty foreground area, high quality commercial photography, photorealistic rendering, subtle texture, depth of field with blurred edges, background elements at periphery.', 1, datetime('now'));
 

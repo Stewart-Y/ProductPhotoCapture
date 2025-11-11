@@ -14,7 +14,7 @@ NC='\033[0m'
 # EC2 Configuration
 EC2_IP="98.89.71.150"
 EC2_USER="ubuntu"
-EC2_KEY_PATH="c:/Users/Stewart/Desktop/ProductPhotoCapture/ProductPhotoCaptureKey.pem"
+EC2_KEY_PATH="$HOME/Desktop/ProductPhotoCapture/ProductPhotoCaptureKey.pem"
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Quick Fix: Production UI${NC}"

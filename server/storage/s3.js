@@ -106,6 +106,17 @@ class S3Storage {
   }
 
   /**
+   * Generate deterministic S3 key for enhanced/upscaled image
+   * Pattern: enhanced/{inputKey}_x{scale}.{ext}
+   * Example: enhanced/originals/SKU123/abc123.jpg_x4.jpg
+   */
+  getEnhancedKey(inputS3Key, scale = 4) {
+    // Extract extension from input key
+    const ext = inputS3Key.split('.').pop();
+    return `enhanced/${inputS3Key}_x${scale}.${ext}`;
+  }
+
+  /**
    * Generate presigned PUT URL (for uploading)
    * @param {string} key - S3 object key
    * @param {string} contentType - MIME type (e.g., 'image/jpeg')

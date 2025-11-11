@@ -90,11 +90,22 @@ export class FreepikCompositeProvider {
       const cutoutBase64 = resizedCutout.toString('base64');
       const backgroundBase64 = resizedBackground.toString('base64');
 
-      // Step 4: Build AI composite prompt
-      const prompt = options.customPrompt || this.buildCompositePrompt(theme);
+      // Step 4: Detect if background is simple/solid color (Flow v2)
+      const isSimpleBackground = await this.isSimpleBackground(resizedBackground);
+
+      // Step 5: Build AI composite prompt (different for simple vs complex backgrounds)
+      let prompt;
+      if (options.customPrompt) {
+        prompt = options.customPrompt;
+      } else if (isSimpleBackground) {
+        prompt = this.buildSimpleCompositePrompt(theme);
+      } else {
+        prompt = this.buildCompositePrompt(theme);
+      }
 
       console.log('[FreepikComposite] Submitting to Seedream AI...', {
-        prompt: prompt.substring(0, 100) + '...'
+        prompt: prompt.substring(0, 100) + '...',
+        isSimpleBackground
       });
 
       // Step 4: Submit to Seedream 4 Edit API
@@ -179,8 +190,9 @@ export class FreepikCompositeProvider {
     try {
       const payload = {
         prompt,
-        reference_images: [backgroundBase64, cutoutBase64], // Background first, then cutout
-        guidance_scale: 7.5 // How closely to follow prompt (0-20)
+        reference_images: [cutoutBase64, backgroundBase64], // CUTOUT FIRST (primary reference to preserve)
+        guidance_scale: 7.5, // How closely to follow prompt (0-20)
+        preserve_details: true // Request maximum detail preservation
       };
 
       const response = await fetch(this.apiUrl, {
@@ -342,20 +354,104 @@ export class FreepikCompositeProvider {
   }
 
   /**
-   * Build AI composite prompt based on theme
+   * Detect if background is simple/solid color (low complexity)
+   * Simple backgrounds need literal placement, not creative generation
+   */
+  async isSimpleBackground(imageBuffer) {
+    try {
+      const metadata = await sharp(imageBuffer).stats();
+
+      // Calculate color variance across channels
+      const channels = metadata.channels;
+      let totalVariance = 0;
+
+      for (const channel of channels) {
+        // Variance = standard deviation squared
+        const variance = Math.pow(channel.stdev, 2);
+        totalVariance += variance;
+      }
+
+      const avgVariance = totalVariance / channels.length;
+
+      // If average variance is very low, it's likely a simple/solid background
+      // Threshold: < 100 is very simple (solid colors, gradients)
+      const isSimple = avgVariance < 100;
+
+      console.log('[FreepikComposite] Background complexity analysis:', {
+        avgVariance: avgVariance.toFixed(2),
+        isSimple,
+        threshold: 100
+      });
+
+      return isSimple;
+
+    } catch (error) {
+      console.error('[FreepikComposite] Background analysis failed:', error.message);
+      return false; // Default to complex if analysis fails
+    }
+  }
+
+  /**
+   * Build AI composite prompt for SIMPLE backgrounds (literal placement)
+   * Universal prompt that works for all background types without shadows
+   */
+  buildSimpleCompositePrompt(theme) {
+    return this.buildUniversalCompositePrompt(theme);
+  }
+
+  /**
+   * Build AI composite prompt for COMPLEX backgrounds (creative integration)
+   * Universal prompt that works for all background types without shadows
    */
   buildCompositePrompt(theme) {
-    const basePrompt = "Professional product photography with the product bottle centered and naturally integrated into the background scene. ";
+    return this.buildUniversalCompositePrompt(theme);
+  }
 
-    const themePrompts = {
-      kitchen: "Realistic kitchen environment with natural lighting, soft shadows, and warm atmosphere. The product appears naturally placed on the kitchen counter.",
-      outdoors: "Natural outdoor setting with beautiful lighting, the product seamlessly integrated into the scene with realistic shadows and ambient occlusion.",
-      minimal: "Clean minimalist setting with subtle lighting, the product prominently displayed with professional studio quality.",
-      luxury: "Elegant luxury setting with sophisticated lighting, the product showcased in a premium environment with refined details.",
-      default: "Clean professional setting with balanced lighting, the product naturally placed in the scene with realistic shadows and depth."
-    };
+  /**
+   * Universal composite prompt (no shadows, background-only lighting adjustments)
+   * Optimized for Freepik Seedream 4 Edit API with mask support
+   */
+  buildUniversalCompositePrompt(theme) {
+    const basePrompt =
+      "TASK: Composite two images into one.\n" +
+      "- Image A = product bottle (subject). Use it exactly as provided (no regeneration).\n" +
+      "- Image B = background scene. Keep full canvas size/aspect.\n\n" +
 
-    return basePrompt + (themePrompts[theme] || themePrompts.default);
+      "GOAL:\n" +
+      "- Center the bottle perfectly in the final frame.\n" +
+      "- Match lighting between subject and background by adjusting the BACKGROUND ONLY.\n" +
+      "- Absolutely NO SHADOWS (no cast shadow, drop shadow, reflection, glow, or halo).\n" +
+      "- Preserve label text/logos on the bottle pixel-for-pixel (no re-drawing or resynthesis).\n\n" +
+
+      "MASK (optional but recommended):\n" +
+      "- Treat the bottle region as PROTECTED/immutable. Apply edits only to non-masked pixels.\n\n" +
+
+      "INSTRUCTIONS:\n" +
+      "1) Place the bottle centered on the canvas (do not crop the background).\n" +
+      "2) Do NOT modify bottle pixels: keep edges, glass texture, foil/cap, label typography, barcodes, and micro-text unchanged.\n" +
+      "3) Harmonize by adjusting ONLY the background's exposure, contrast, white balance, and color temperature to match the bottle's lighting.\n" +
+      "4) Ensure clean, anti-aliased compositing at the bottle contour—no halos or fringing.\n" +
+      "5) Do not add or simulate any shadows, reflections, glow, bloom, or gradients near the subject.\n" +
+      "6) No generative fill over the bottle area. No text additions/removals anywhere.\n" +
+      "7) Output a single composite at the background's native resolution; bottle centered; no borders/watermarks.\n\n" +
+
+      "NEGATIVE CONSTRAINTS:\n" +
+      "- Do NOT re-render, repaint, stylize, enhance, denoise, or sharpen the bottle.\n" +
+      "- Do NOT alter label fonts, colors, kerning, fine print, or logos.\n" +
+      "- Do NOT crop or resize the canvas unless required to maintain aspect ratio.\n" +
+      "- Do NOT apply global filters that touch the protected subject region.\n\n" +
+
+      "ACCEPTANCE CRITERIA:\n" +
+      "- Bottle is exactly centered; background size/aspect preserved.\n" +
+      "- Bottle text and details are identical to original pixels.\n" +
+      "- Lighting is consistent WITHOUT adding shadows or rim effects.\n\n" +
+
+      "OPTIONAL ADD-ONS:\n" +
+      "- Scale: Set bottle height to exactly 27% of canvas height, then center.\n" +
+      "- Background-only color cast: Subtly shift background toward the bottle's key-light temperature; keep bottle's white point unchanged.\n" +
+      "- Noise match: Match grain/noise on BACKGROUND ONLY to the bottle's noise level; do not touch subject pixels.";
+
+    return basePrompt;
   }
 
   /**

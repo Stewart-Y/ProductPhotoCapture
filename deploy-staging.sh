@@ -12,9 +12,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # EC2 Configuration
-EC2_IP="98.89.71.150"
+EC2_IP="54.82.99.169"
 EC2_USER="ubuntu"
-EC2_KEY_PATH="c:/Users/Stewart/Desktop/ProductPhotoCapture/ProductPhotoCaptureKey.pem"
+EC2_KEY_PATH="$HOME/Desktop/ProductPhotoCapture/ProductPhotoCaptureKey.pem"
 STAGING_DIR="/home/ubuntu/ProductPhotoCapture-staging"
 
 echo -e "${GREEN}========================================${NC}"

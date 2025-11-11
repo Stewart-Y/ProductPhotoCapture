@@ -32,6 +32,16 @@ import {
   getTemplateWithAssets,
   refreshTemplateAssetUrls
 } from '../workflows/template-generator.js';
+import {
+  enhanceImage,
+  getEnhancement,
+  listEnhancements
+} from '../workflows/enhance.js';
+import {
+  findProductBySKU,
+  uploadProductImages,
+  testConnection as testShopifyConnection
+} from '../integrations/shopify.js';
 
 const router = express.Router();
 const s3 = getS3Storage();
@@ -945,7 +955,7 @@ router.get('/settings/compositor', (req, res) => {
 
     res.json({
       compositor,
-      options: ['freepik', 'nanobanana']
+      options: ['none', 'freepik', 'nanobanana']
     });
   } catch (error) {
     console.error('[Get Compositor] Error:', error);
@@ -958,10 +968,10 @@ router.post('/settings/compositor', (req, res) => {
   try {
     const { compositor } = req.body;
 
-    if (!compositor || !['freepik', 'nanobanana'].includes(compositor)) {
+    if (!compositor || !['freepik', 'nanobanana', 'none'].includes(compositor)) {
       return res.status(400).json({
         error: 'Invalid compositor',
-        validValues: ['freepik', 'nanobanana']
+        validValues: ['freepik', 'nanobanana', 'none']
       });
     }
 
@@ -993,6 +1003,189 @@ export function getCompositorPreference() {
   } catch (error) {
     console.error('[Get Compositor Preference] Error:', error);
     return process.env.AI_COMPOSITOR || 'freepik'; // Safe fallback
+  }
+}
+
+// =============================================================================
+// Sharp Workflow Preference Endpoints - Enable full Sharp workflow
+// =============================================================================
+
+// GET /settings/sharp-workflow - Retrieve Sharp workflow preference
+router.get('/settings/sharp-workflow', (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'sharp_workflow'
+    `).get();
+
+    const enabled = result?.value === 'true' || result?.value === '1';
+
+    res.json({
+      enabled,
+      description: 'Use template backgrounds + Sharp compositor (no AI, only background removal cost)'
+    });
+  } catch (error) {
+    console.error('[Get Sharp Workflow] Error:', error);
+    res.status(500).json({ error: 'Failed to get Sharp workflow preference', details: error.message });
+  }
+});
+
+// POST /settings/sharp-workflow - Save Sharp workflow preference
+router.post('/settings/sharp-workflow', (req, res) => {
+  try {
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        error: 'enabled must be a boolean'
+      });
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('sharp_workflow', ?, datetime('now'))
+    `).run(enabled ? '1' : '0');
+
+    console.log(`[Sharp Workflow] Updated preference to: ${enabled}`);
+
+    res.json({
+      success: true,
+      enabled,
+      message: 'Sharp workflow preference saved successfully'
+    });
+  } catch (error) {
+    console.error('[Save Sharp Workflow] Error:', error);
+    res.status(500).json({ error: 'Failed to save Sharp workflow preference', details: error.message });
+  }
+});
+
+// Export function to access Sharp workflow preference from other modules
+export function getSharpWorkflowPreference() {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'sharp_workflow'
+    `).get();
+    return result?.value === 'true' || result?.value === '1';
+  } catch (error) {
+    console.error('[Get Sharp Workflow Preference] Error:', error);
+    return false; // Safe fallback - disabled by default
+  }
+}
+
+// =============================================================================
+// Sharp Settings Endpoints - Configure Sharp compositor parameters
+// =============================================================================
+
+// GET /settings/sharp-settings - Retrieve Sharp compositor settings
+router.get('/settings/sharp-settings', (req, res) => {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'sharp_settings'
+    `).get();
+
+    const defaultSettings = {
+      bottleHeightPercent: 0.75,
+      quality: 90,
+      format: 'jpeg',
+      gravity: 'center',
+      sharpen: 0,
+      gamma: 1.0
+    };
+
+    const settings = result?.value ? JSON.parse(result.value) : defaultSettings;
+
+    res.json({
+      success: true,
+      settings
+    });
+  } catch (error) {
+    console.error('[Get Sharp Settings] Error:', error);
+    res.status(500).json({ error: 'Failed to get Sharp settings', details: error.message });
+  }
+});
+
+// POST /settings/sharp-settings - Save Sharp compositor settings
+router.post('/settings/sharp-settings', (req, res) => {
+  try {
+    const { settings } = req.body;
+
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({
+        error: 'settings object is required'
+      });
+    }
+
+    // Validate settings
+    const {
+      bottleHeightPercent,
+      quality,
+      format,
+      gravity,
+      sharpen,
+      gamma
+    } = settings;
+
+    if (typeof bottleHeightPercent !== 'number' || bottleHeightPercent < 0.1 || bottleHeightPercent > 1.0) {
+      return res.status(400).json({ error: 'bottleHeightPercent must be between 0.1 and 1.0' });
+    }
+
+    if (typeof quality !== 'number' || quality < 60 || quality > 100) {
+      return res.status(400).json({ error: 'quality must be between 60 and 100' });
+    }
+
+    if (!['jpeg', 'png', 'webp'].includes(format)) {
+      return res.status(400).json({ error: 'format must be jpeg, png, or webp' });
+    }
+
+    if (!['center', 'north', 'south', 'east', 'west'].includes(gravity)) {
+      return res.status(400).json({ error: 'gravity must be center, north, south, east, or west' });
+    }
+
+    // Save settings as JSON
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at)
+      VALUES ('sharp_settings', ?, datetime('now'))
+    `).run(JSON.stringify(settings));
+
+    console.log('[Sharp Settings] Updated settings:', settings);
+
+    res.json({
+      success: true,
+      settings,
+      message: 'Sharp settings saved successfully'
+    });
+  } catch (error) {
+    console.error('[Save Sharp Settings] Error:', error);
+    res.status(500).json({ error: 'Failed to save Sharp settings', details: error.message });
+  }
+});
+
+// Export function to access Sharp settings from other modules
+export function getSharpSettings() {
+  try {
+    const result = db.prepare(`
+      SELECT value FROM settings WHERE key = 'sharp_settings'
+    `).get();
+
+    const defaultSettings = {
+      bottleHeightPercent: 0.75,
+      quality: 90,
+      format: 'jpeg',
+      gravity: 'center',
+      sharpen: 0,
+      gamma: 1.0
+    };
+
+    return result?.value ? JSON.parse(result.value) : defaultSettings;
+  } catch (error) {
+    console.error('[Get Sharp Settings] Error:', error);
+    return {
+      bottleHeightPercent: 0.75,
+      quality: 90,
+      format: 'jpeg',
+      gravity: 'center',
+      sharpen: 0,
+      gamma: 1.0
+    }; // Safe fallback
   }
 }
 
@@ -1725,6 +1918,384 @@ router.patch('/templates/:templateId/variants/:variantId/toggle', async (req, re
 
   } catch (error) {
     console.error('[API] Failed to toggle variant selection:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// =============================================================================
+// Image Enhancement (Upscaling) Routes
+// =============================================================================
+
+// Configure multer for enhancement image uploads
+const uploadForEnhancement = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
+
+/**
+ * POST /api/upload-for-enhancement
+ * Upload an image file to S3 for enhancement
+ *
+ * Form data:
+ * - file: image file
+ *
+ * Returns:
+ * {
+ *   "success": true,
+ *   "s3Key": "enhancement-uploads/abc123.jpg",
+ *   "url": "https://..."
+ * }
+ */
+router.post('/upload-for-enhancement', uploadForEnhancement.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    const file = req.file;
+    const fileExt = file.originalname.split('.').pop() || 'jpg';
+    const fileName = `${crypto.randomBytes(16).toString('hex')}.${fileExt}`;
+    const s3Key = `enhancement-uploads/${fileName}`;
+
+    console.log('[API/Upload] Uploading file for enhancement:', {
+      originalName: file.originalname,
+      size: file.size,
+      mimetype: file.mimetype,
+      s3Key
+    });
+
+    // Upload to S3
+    await s3.uploadBuffer(s3Key, file.buffer, file.mimetype);
+
+    // Generate presigned URL
+    const url = await s3.getPresignedGetUrl(s3Key, 3600);
+
+    res.json({
+      success: true,
+      s3Key,
+      url
+    });
+
+  } catch (error) {
+    console.error('[API/Upload] Upload failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/enhance
+ * Enhance (upscale) an image using AI (Real-ESRGAN)
+ *
+ * Body:
+ * {
+ *   "inputS3Key": "originals/SKU123/abc123.jpg",
+ *   "scale": 4,              // 2, 4, or 8
+ *   "faceEnhance": false     // optional
+ * }
+ */
+router.post('/enhance', async (req, res) => {
+  try {
+    const { inputS3Key, scale = 4, faceEnhance = false, model = 'clarity' } = req.body;
+
+    // Validate input
+    if (!inputS3Key) {
+      return res.status(400).json({
+        success: false,
+        error: 'inputS3Key is required'
+      });
+    }
+
+    if (![2, 4, 8].includes(scale)) {
+      return res.status(400).json({
+        success: false,
+        error: 'scale must be 2, 4, or 8'
+      });
+    }
+
+    if (!['real-esrgan', 'clarity'].includes(model)) {
+      return res.status(400).json({
+        success: false,
+        error: 'model must be "real-esrgan" or "clarity"'
+      });
+    }
+
+    console.log('[API/Enhance] Starting enhancement:', { inputS3Key, scale, faceEnhance, model });
+
+    // Call enhancement workflow
+    const result = await enhanceImage({
+      inputS3Key,
+      scale,
+      faceEnhance,
+      model,
+      db
+    });
+
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[API/Enhance] Enhancement failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/enhance/:enhancementId
+ * Get enhancement status and result
+ */
+router.get('/enhance/:enhancementId', async (req, res) => {
+  try {
+    const { enhancementId } = req.params;
+
+    const result = await getEnhancement({
+      enhancementId,
+      db
+    });
+
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[API/Enhance] Get enhancement failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/enhance
+ * List all enhancements (paginated)
+ *
+ * Query params:
+ * - limit: number (default: 50)
+ * - offset: number (default: 0)
+ */
+router.get('/enhance', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit || '50', 10);
+    const offset = parseInt(req.query.offset || '0', 10);
+
+    const result = await listEnhancements({
+      db,
+      limit,
+      offset
+    });
+
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[API/Enhance] List enhancements failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// =============================================================================
+// SHOPIFY INTEGRATION
+// =============================================================================
+
+/**
+ * POST /api/jobs/:id/push-shopify
+ * Manually push completed job images to Shopify
+ * Used for testing and manual triggers from UI
+ */
+router.post('/jobs/:id/push-shopify', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`[Shopify Push] Manual trigger for job ${id}`);
+
+    // Get job details
+    const job = getJob(id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found'
+      });
+    }
+
+    // Ensure job is completed
+    if (job.status !== JobStatus.DONE && job.status !== JobStatus.DERIVATIVES) {
+      return res.status(400).json({
+        success: false,
+        error: `Job must be in DONE or DERIVATIVES status. Current status: ${job.status}`
+      });
+    }
+
+    // Check if already pushed to Shopify
+    if (job.shopify_media_ids && JSON.parse(job.shopify_media_ids).length > 0) {
+      console.log(`[Shopify Push] Job ${id} already pushed to Shopify`);
+      return res.json({
+        success: true,
+        message: 'Images already pushed to Shopify',
+        shopify_product_id: job.shopify_product_id,
+        shopify_media_ids: JSON.parse(job.shopify_media_ids)
+      });
+    }
+
+    // Find Shopify product by SKU
+    console.log(`[Shopify Push] Looking up Shopify product for SKU: ${job.sku}`);
+    const product = await findProductBySKU(job.sku, db);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: `No Shopify product found for SKU: ${job.sku}. Please ensure the product exists in Shopify and has the correct SKU.`
+      });
+    }
+
+    // Get composite image URLs from S3
+    const compositeKeys = job.s3_composite_keys ? JSON.parse(job.s3_composite_keys) : [];
+
+    if (compositeKeys.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No composite images found for this job'
+      });
+    }
+
+    // Generate presigned URLs for composites
+    console.log(`[Shopify Push] Generating presigned URLs for ${compositeKeys.length} images`);
+    const imageUrls = await Promise.all(
+      compositeKeys.map(key => s3.getPresignedUrl(key, 3600)) // 1 hour expiry
+    );
+
+    // Upload images to Shopify
+    console.log(`[Shopify Push] Uploading ${imageUrls.length} images to Shopify product ${product.productId}`);
+    const uploadResults = await uploadProductImages(
+      product.productId,
+      imageUrls,
+      `${job.sku} - ${job.theme || 'Enhanced'}`
+    );
+
+    // Extract successful media IDs
+    const mediaIds = uploadResults
+      .filter(r => !r.error && r.id)
+      .map(r => r.id);
+
+    if (mediaIds.length === 0) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to upload any images to Shopify',
+        details: uploadResults
+      });
+    }
+
+    // Update job with Shopify info
+    db.prepare(`
+      UPDATE jobs
+      SET shopify_product_id = ?,
+          shopify_media_ids = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(product.productId, JSON.stringify(mediaIds), id);
+
+    console.log(`[Shopify Push] Successfully pushed ${mediaIds.length} images to Shopify for job ${id}`);
+
+    res.json({
+      success: true,
+      message: `Successfully uploaded ${mediaIds.length} images to Shopify`,
+      shopify_product_id: product.productId,
+      shopify_media_ids: mediaIds,
+      product_title: product.title,
+      product_handle: product.handle,
+      upload_results: uploadResults
+    });
+
+  } catch (error) {
+    console.error('[Shopify Push] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/shopify/product/:sku
+ * Test endpoint to lookup Shopify product by SKU
+ */
+router.get('/shopify/product/:sku', async (req, res) => {
+  try {
+    const { sku } = req.params;
+
+    console.log(`[Shopify Lookup] Finding product for SKU: ${sku}`);
+
+    const product = await findProductBySKU(sku, db);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: `No product found for SKU: ${sku}`
+      });
+    }
+
+    res.json({
+      success: true,
+      product
+    });
+
+  } catch (error) {
+    console.error('[Shopify Lookup] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/shopify/test
+ * Test Shopify API connection
+ */
+router.get('/shopify/test', async (req, res) => {
+  try {
+    const result = await testShopifyConnection();
+
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('[Shopify Test] Error:', error);
     res.status(500).json({
       success: false,
       error: error.message

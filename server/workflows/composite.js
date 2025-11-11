@@ -76,19 +76,34 @@ export async function compositeImage({
       normalizeToSRGB(backgroundBuffer, { keepExif: false })
     ]);
 
-    // Step 4: Resize background to match mask dimensions
-    console.log('[Compositor] Resizing background to match mask...');
+    // Step 4: Get final canvas dimensions and resize mask to 75% of height
+    const backgroundMeta = await sharp(normalizedBackground).metadata();
+    const canvasWidth = backgroundMeta.width;
+    const canvasHeight = backgroundMeta.height;
 
-    const resizedBackground = await sharp(normalizedBackground)
-      .resize(maskMeta.width, maskMeta.height, {
-        fit: options.fit || 'cover',       // cover, contain, fill, inside, outside
-        position: options.position || 'center',
-        kernel: 'lanczos3'                 // High-quality downscaling
+    // Calculate target height for mask (75% of canvas height)
+    const targetMaskHeight = Math.round(canvasHeight * (options.bottleHeightPercent || 0.75));
+
+    // Calculate width maintaining aspect ratio
+    const maskAspectRatio = maskMeta.width / maskMeta.height;
+    const targetMaskWidth = Math.round(targetMaskHeight * maskAspectRatio);
+
+    console.log('[Compositor] Resizing mask to 75% of canvas height...', {
+      canvasSize: `${canvasWidth}x${canvasHeight}`,
+      originalMaskSize: `${maskMeta.width}x${maskMeta.height}`,
+      targetMaskSize: `${targetMaskWidth}x${targetMaskHeight}`,
+      bottlePercent: `${(options.bottleHeightPercent || 0.75) * 100}%`
+    });
+
+    const resizedMask = await sharp(normalizedMask)
+      .resize(targetMaskWidth, targetMaskHeight, {
+        fit: 'contain',
+        kernel: 'lanczos3'
       })
       .toBuffer();
 
-    // Step 5: Create drop shadow (Flow v2)
-    const shadowEnabled = options.dropShadow !== false; // Enabled by default
+    // Step 5: Create drop shadow (DISABLED by default per requirements)
+    const shadowEnabled = options.dropShadow === true; // Disabled by default
     let shadowBuffer = null;
 
     if (shadowEnabled) {
@@ -101,13 +116,15 @@ export async function compositeImage({
         offsetY: options.shadowOffsetY || 5
       };
 
-      shadowBuffer = await createDropShadow(normalizedMask, maskMeta, shadowConfig);
+      // Create shadow from resized mask
+      const resizedMaskMeta = await sharp(resizedMask).metadata();
+      shadowBuffer = await createDropShadow(resizedMask, resizedMaskMeta, shadowConfig);
     }
 
     // Step 6: Auto-center and composite (Flow v2)
     console.log('[Compositor] Auto-centering and compositing...');
 
-    const compositeSharp = sharp(resizedBackground);
+    const compositeSharp = sharp(normalizedBackground);
 
     const compositeInputs = [];
 
@@ -120,9 +137,9 @@ export async function compositeImage({
       });
     }
 
-    // Add mask on top (with auto-centering via gravity)
+    // Add resized mask on top (with auto-centering via gravity)
     compositeInputs.push({
-      input: normalizedMask,
+      input: resizedMask,
       blend: options.blend || 'over',    // Alpha blending mode
       gravity: options.gravity || 'center' // Auto-center by default
     });

@@ -194,10 +194,8 @@ export class NanoBananaCompositeProvider {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // OpenRouter uses OpenAI-compatible chat completion format
-        // Use different instructions based on background complexity
-        const instructions = isSimpleBackground
-          ? `${prompt}\n\nCRITICAL INSTRUCTIONS:\n- Place the transparent product cutout EXACTLY onto the background WITHOUT ANY MODIFICATIONS\n- DO NOT regenerate, redraw, or alter the product in any way\n- DO NOT change, modify, or regenerate ANY text, labels, or logos on the product\n- Keep ALL product details EXACTLY as they appear in the cutout image\n- Keep the background EXACTLY as provided without adding any new elements\n- Only add a subtle natural shadow beneath the product for realism\n- The product cutout is FINAL and must be placed as-is\n\nIMAGE QUALITY ENHANCEMENT:\n- Generate the final composite in the highest possible quality and resolution\n- Ensure sharp, crisp details throughout the entire image\n- Optimize clarity, sharpness, and overall image quality\n- Maintain excellent color accuracy and dynamic range\n- Produce a professional, high-definition result suitable for e-commerce`
-          : `${prompt}\n\nCRITICAL INSTRUCTIONS:\n- Place the transparent product cutout onto the background scene\n- DO NOT regenerate or redraw the product - use it EXACTLY as provided\n- DO NOT modify ANY text, labels, logos, or details on the product bottle\n- Keep ALL product text and labels EXACTLY as they appear in the original cutout\n- Only adjust lighting, shadows, and environmental integration around the product\n- The product itself must remain untouched and unmodified\n- Create realistic shadows and reflections that complement the scene\n\nIMAGE QUALITY ENHANCEMENT:\n- Generate the final composite in the highest possible quality and resolution\n- Ensure sharp, crisp details throughout the entire image\n- Optimize clarity, sharpness, and overall image quality\n- Maintain excellent color accuracy and dynamic range\n- Produce a professional, high-definition result suitable for e-commerce`;
+        // Use inpainting-style instructions (Google Gemini best practices)
+        const instructions = `${prompt}\n\nKeep everything exactly the same as in the source images, preserving the original style, lighting, and composition. The bottle from the second image should be placed onto the first image with all its details maintained precisely.`;
 
         const payload = {
           model: this.modelId,
@@ -399,26 +397,350 @@ export class NanoBananaCompositeProvider {
 
   /**
    * Build AI composite prompt for SIMPLE backgrounds (literal placement)
+   * Universal prompt that works for all background types without shadows
    */
   buildSimpleCompositePrompt(theme) {
-    return "Place the product in the center of the provided background. Use the background exactly as provided without modification.";
+    return this.buildUniversalCompositePrompt(theme);
   }
 
   /**
    * Build AI composite prompt for COMPLEX backgrounds (creative integration)
+   * Universal prompt that works for all background types without shadows
    */
   buildCompositePrompt(theme) {
-    const basePrompt = "Realistically composite the product bottle into the background scene. ";
+    return this.buildUniversalCompositePrompt(theme);
+  }
 
-    const themePrompts = {
-      kitchen: "Place the product naturally on the kitchen counter with realistic lighting, shadows, and reflections. The product should look like it naturally belongs in this kitchen setting.",
-      outdoors: "Place the product on the outdoor surface with natural lighting and shadows that match the environment. The product should integrate seamlessly with the outdoor scene.",
-      minimal: "Place the product in the center with clean, minimal composition. Maintain crisp product details and labels.",
-      luxury: "Place the product elegantly in the luxury setting with sophisticated lighting and premium atmosphere.",
-      default: "Place the product naturally in the scene with realistic shadows, lighting, and depth. Preserve all product details including text and labels."
+  /**
+   * Universal composite prompt (no shadows, background-only lighting adjustments)
+   * Following Google's official Gemini 2.5 Flash best practices:
+   * - Descriptive narrative style (not keyword lists or structured tasks)
+   * - Explicit multi-image reference syntax
+   * - Conversational scene descriptions
+   * - Spatial clarity for element placement
+   */
+  buildUniversalCompositePrompt(theme) {
+    const basePrompt =
+      "Create a professional product photograph by combining the two provided images. " +
+      "Take the product bottle from Image 1 and place it perfectly centered in the scene from Image 2. " +
+
+      "The bottle from Image 1 must remain completely unchanged—preserve every detail including the exact label text, typography, logos, barcodes, glass texture, cap details, and foil accents exactly as they appear in the original. " +
+      "Do not regenerate, redraw, or modify any part of the bottle. The label text must be pixel-accurate with no changes to fonts, colors, or kerning. " +
+
+      "Position the bottle in the center of the composition from Image 2, maintaining the full canvas size and aspect ratio of the background scene. " +
+      "The background should extend naturally around the bottle, keeping all of Image 2's original atmosphere, depth, and composition intact. " +
+
+      "To create a cohesive final image, adjust only the background's lighting to harmonize with the bottle's existing illumination—modify the background's exposure, contrast, white balance, and color temperature so the lighting feels natural and consistent. " +
+      "Do not apply any lighting changes to the bottle itself. " +
+
+      "The compositing must be clean and seamless with smooth, anti-aliased edges where the bottle meets the background—no halos, no color fringing, no glowing edges. " +
+
+      "Critical: Do not add any shadows, cast shadows, drop shadows, reflections, ground contact shadows, or depth effects around or beneath the bottle. " +
+      "The bottle should appear to naturally exist in the scene without any additional shadow simulation. " +
+
+      "Output a single, final composite image with the bottle centered, the background fully visible at its native resolution, and no borders or watermarks. " +
+      "The result should look like a professional product photograph where the bottle and background lighting naturally match, but without any artificial shadows or effects.";
+
+    return basePrompt;
+  }
+
+  /**
+   * Enhance lighting on an existing composite image
+   * Used for Sharp Workflow + Nano Banana combined flow
+   *
+   * @param {Object} params
+   * @param {string} params.compositeS3Key - S3 key for Sharp composite
+   * @param {string} params.sku - Product SKU
+   * @param {string} params.sha256 - Image hash
+   * @param {string} params.theme - Theme name
+   * @param {number} params.variant - Variant number
+   * @returns {Promise<Object>} Enhanced composite result
+   */
+  async enhanceLighting({
+    compositeS3Key,
+    sku,
+    sha256,
+    theme = 'default',
+    variant = 1
+  }) {
+    const startTime = Date.now();
+
+    console.log('[NanoBanana] Starting lighting enhancement', {
+      sku,
+      compositeS3Key,
+      theme,
+      variant
+    });
+
+    try {
+      const storage = getStorage();
+
+      // Step 1: Download Sharp composite from S3
+      console.log('[NanoBanana] Downloading Sharp composite from S3');
+      const compositeUrl = await storage.getPresignedGetUrl(compositeS3Key, 300);
+      const compositeBuffer = await this.downloadFromS3(storage, compositeS3Key);
+
+      console.log('[NanoBanana] Sharp composite downloaded', {
+        size: `${(compositeBuffer.length / 1024).toFixed(2)}KB`
+      });
+
+      // Step 2: Resize to max 2048px (Nano Banana limit)
+      console.log('[NanoBanana] Resizing composite to 2048px max...');
+      const resizedComposite = await sharp(compositeBuffer)
+        .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      // Step 3: Convert to base64
+      const compositeBase64 = resizedComposite.toString('base64');
+
+      // Step 4: Build lighting enhancement prompt
+      const prompt = this.getLightingPrompt(theme);
+
+      console.log('[NanoBanana] Using lighting enhancement prompt', {
+        prompt: prompt.substring(0, 100) + '...'
+      });
+
+      // Step 5: Submit to Nano Banana for lighting enhancement
+      const result = await this.submitLightingRequest({
+        compositeBase64,
+        prompt
+      });
+
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error,
+          provider: 'NanoBanana',
+          cost: 0
+        };
+      }
+
+      console.log('[NanoBanana] AI lighting enhancement complete');
+
+      // Step 6: Download enhanced image
+      const enhancedBuffer = Buffer.from(result.imageBase64, 'base64');
+
+      // Step 7: Upload to S3 (final composite with lighting)
+      const enhancedS3Key = storage.getCompositeKey(
+        sku,
+        sha256,
+        theme,
+        '1x1',
+        variant,
+        'nanobanana-enhanced'
+      );
+
+      console.log('[NanoBanana] Uploading enhanced composite to S3', {
+        s3Key: enhancedS3Key,
+        size: enhancedBuffer.length
+      });
+
+      await storage.uploadBuffer(enhancedS3Key, enhancedBuffer, 'image/jpeg');
+
+      // Step 8: Generate presigned URL
+      const s3Url = await storage.getPresignedGetUrl(enhancedS3Key, 3600);
+
+      const duration = Date.now() - startTime;
+
+      console.log('[NanoBanana] Lighting enhancement complete:', {
+        sku,
+        theme,
+        s3Key: enhancedS3Key,
+        duration: `${duration}ms`,
+        cost: '$0.0300'
+      });
+
+      return {
+        success: true,
+        s3Key: enhancedS3Key,
+        s3Url,
+        provider: 'NanoBanana',
+        cost: 0.03,
+        metadata: {
+          duration,
+          theme,
+          prompt,
+          workflow: 'sharp_nanobanana_lighting',
+          sharpCompositeS3Key: compositeS3Key,
+          combinedFlow: true
+        }
+      };
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      console.error('[NanoBanana] Lighting enhancement failed', {
+        sku,
+        error: error.message,
+        duration: `${duration}ms`
+      });
+
+      return {
+        success: false,
+        error: error.message,
+        provider: 'NanoBanana',
+        cost: 0
+      };
+    }
+  }
+
+  /**
+   * Submit lighting enhancement request to Nano Banana
+   */
+  async submitLightingRequest({ compositeBase64, prompt }) {
+    const maxRetries = 3;
+    const initialDelay = 2000;
+    const backoffMultiplier = 2;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const instructions = `${prompt}\n\nPreserve the product and background exactly as shown. Only adjust lighting, shadows, and ambient effects to create a more professional, photorealistic appearance.`;
+
+        const payload = {
+          model: this.modelId,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: instructions
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/jpeg;base64,${compositeBase64}`
+                  }
+                }
+              ]
+            }
+          ],
+          max_tokens: 1024,
+          temperature: 0.4 // Lower temperature for subtle lighting adjustments
+        };
+
+        console.log(`[NanoBanana/OpenRouter] Lighting enhancement attempt ${attempt}/${maxRetries}`);
+
+        const response = await fetch(this.apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`,
+            'HTTP-Referer': 'https://productphotos.click',
+            'X-Title': 'Product Photo Capture'
+          },
+          body: JSON.stringify(payload),
+          timeout: 120000
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          const error = new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+
+          if ([502, 503, 504].includes(response.status) && attempt < maxRetries) {
+            const delay = initialDelay * Math.pow(backoffMultiplier, attempt - 1);
+            console.warn(`[NanoBanana/OpenRouter] Temporary error ${response.status}, retrying in ${delay}ms...`);
+            await this.sleep(delay);
+            continue;
+          }
+
+          throw error;
+        }
+
+        const result = await response.json();
+        const message = result.choices?.[0]?.message;
+
+        if (!message) {
+          throw new Error(`No message in response: ${JSON.stringify(result)}`);
+        }
+
+        // Extract image from response
+        let imageBase64 = null;
+
+        if (message.images && Array.isArray(message.images) && message.images.length > 0) {
+          const imageObj = message.images[0];
+          if (imageObj.type === 'image_url' && imageObj.image_url?.url) {
+            const match = imageObj.image_url.url.match(/^data:image\/[^;]+;base64,(.+)$/);
+            if (match) {
+              imageBase64 = match[1];
+            }
+          }
+        }
+
+        if (!imageBase64 && Array.isArray(message.content)) {
+          for (const part of message.content) {
+            if (part.type === 'image_url' && part.image_url?.url) {
+              const match = part.image_url.url.match(/^data:image\/[^;]+;base64,(.+)$/);
+              if (match) {
+                imageBase64 = match[1];
+                break;
+              }
+            }
+          }
+        }
+
+        if (!imageBase64 && typeof message.content === 'string') {
+          const match = message.content.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+          if (match) {
+            imageBase64 = match[1];
+          }
+        }
+
+        if (!imageBase64) {
+          throw new Error(`No image data in response: ${JSON.stringify(result)}`);
+        }
+
+        console.log(`[NanoBanana/OpenRouter] ✅ Lighting enhancement successful on attempt ${attempt}`);
+
+        return {
+          success: true,
+          imageBase64
+        };
+
+      } catch (error) {
+        console.error(`[NanoBanana/OpenRouter] Attempt ${attempt}/${maxRetries} failed:`, error.message);
+
+        if (attempt >= maxRetries) {
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+
+        const delay = initialDelay * Math.pow(backoffMultiplier, attempt - 1);
+        console.log(`[NanoBanana/OpenRouter] Retrying in ${delay}ms...`);
+        await this.sleep(delay);
+      }
+    }
+
+    return {
+      success: false,
+      error: 'Max retries exceeded'
+    };
+  }
+
+  /**
+   * Get lighting enhancement prompts (more subtle than full composite)
+   * Following Nano Banana (Gemini 2.5 Flash) best practices:
+   * - Conversational, detailed language
+   * - Explicit preservation cues ("keep bottle unchanged")
+   * - Specific lighting details (color temp, direction, style)
+   * - Reference "provided image" to avoid regeneration
+   */
+  getLightingPrompt(theme) {
+    const prompts = {
+      default: 'Using the provided image of the bottle, adjust only the lighting to simulate soft studio illumination with gentle top and front softbox light and subtle shadows. Keep the bottle and its label exactly as in the original image - preserve the label text, logo, colors, and shape pixel-accurately. Only change the lighting: add even white balance with diffuse shadows to create professional e-commerce quality depth and realism.',
+
+      kitchen: 'Using the provided image of the bottle on a wooden surface, adjust only the lighting to mimic warm indoor ambient light at approximately 3000K color temperature (soft yellow lamp light from the side, gentle warm shadows as if a kitchen window provides natural light). Keep the bottle, its label text, and logo completely unchanged and preserve all typography pixel-accurately. Only adjust the scene lighting to match the warm kitchen atmosphere with soft amber glow and diffuse shadows.',
+
+      outdoors: 'Using the provided image of the bottle, adjust only the lighting to simulate bright outdoor daylight with clear blue sky and strong sunlight. Add crisp directional shadows as if from midday sun at approximately 5500K color temperature, with natural outdoor brightness and atmospheric depth. Keep the bottle, logo, and label text exactly as in the original - preserve the product design and typography without any changes. Only change the lighting to match sunny day conditions with warm golden-hour backlight if late afternoon.',
+
+      minimal: 'Using the provided image of the bottle on a clean white seamless background, adjust only the lighting to a bright studio setup with softbox from above providing even illumination and very subtle shadows on the backdrop. Keep the bottle shape, label text, colors, and all design elements identical to the original image. Only change the background lighting to create a clean minimalist aesthetic with subtle studio lighting and soft gradients, maintaining the product completely unchanged.',
+
+      luxury: 'Using the provided image of the bottle, adjust only the lighting to create dramatic premium illumination with elegant shadow play - add a low-angle key light creating upscale atmosphere with rich contrast and sophisticated depth. Keep the bottle and its label completely unchanged, preserving all text legibility, font, logo, and colors exactly. Only adjust the scene lighting to simulate high-end product photography with warm accent lighting at approximately 3200K and dramatic shadows for an elegant, upscale feel.'
     };
 
-    return basePrompt + (themePrompts[theme] || themePrompts.default);
+    return prompts[theme] || prompts.default;
   }
 
   /**

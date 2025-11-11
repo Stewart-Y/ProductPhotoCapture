@@ -21,25 +21,241 @@ import { FreepikCompositeProvider } from '../providers/freepik/composite.js';
 import { NanoBananaCompositeProvider } from '../providers/nanobanana/composite.js';
 import { generateDerivatives, batchGenerateDerivatives } from './derivatives.js';
 import { buildManifest } from './manifest.js';
-import { getBackgroundPrompt, getWorkflowPreference, getActiveBackgroundTemplate, getCompositorPreference } from '../jobs/routes.js';
+import { getBackgroundPrompt, getWorkflowPreference, getActiveBackgroundTemplate, getCompositorPreference, getSharpWorkflowPreference, getSharpSettings } from '../jobs/routes.js';
 import { getTemplateWithAssets } from './template-generator.js';
+import { findProductBySKU, uploadProductImages } from '../integrations/shopify.js';
+import getS3Storage from '../storage/s3.js';
 import db from '../db.js';
 
 /**
- * Get AI compositor instance based on configuration
- * Reads from database settings first, then falls back to environment variable
+ * Get compositor instance based on configuration
+ * Priority: Sharp Workflow + Flux Kontext > Sharp Workflow > Compositor Preference > Environment Variable
  */
 function getCompositor() {
-  const compositor = getCompositorPreference();
+  // Check if Sharp Workflow is enabled
+  const sharpWorkflowEnabled = getSharpWorkflowPreference();
+  const compositorPreference = getCompositorPreference();
+
+  // COMBINED FLOW: Sharp Workflow + Freepik Seedream = Sharp composite + Seedream lighting
+  if (sharpWorkflowEnabled && compositorPreference === 'freepik') {
+    console.log('[Processor] 🎯 COMBINED FLOW: Sharp Workflow + Freepik Seedream');
+    console.log('[Processor] → Sharp composite (pixel-perfect) + Seedream lighting enhancement');
+
+    const sharpSettings = getSharpSettings();
+    const seedreamProvider = getSeedreamProvider();
+
+    // Return a wrapper that combines Sharp + Seedream
+    return {
+      compositeImage: async (params) => {
+        console.log('[Processor] Step 1/2: Sharp compositing...');
+
+        // Step 1: Sharp composite (pixel-perfect)
+        const sharpResult = await compositeImage({
+          maskS3Key: params.cutoutS3Key,
+          backgroundS3Key: params.backgroundS3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant,
+          options: {
+            ...sharpSettings,
+            ...params.options
+          }
+        });
+
+        if (!sharpResult.success) {
+          return {
+            success: false,
+            error: sharpResult.error,
+            metadata: sharpResult.metadata,
+            cost: 0
+          };
+        }
+
+        console.log('[Processor] Step 2/2: Seedream lighting enhancement...');
+
+        // Step 2: Seedream lighting enhancement (uses Sharp composite as input)
+        const seedreamResult = await seedreamProvider.enhanceLighting({
+          compositeS3Key: sharpResult.s3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant
+        });
+
+        // Return combined result
+        return {
+          success: seedreamResult.success,
+          s3Key: seedreamResult.s3Key,
+          s3Url: seedreamResult.s3Url,
+          error: seedreamResult.error,
+          metadata: {
+            ...seedreamResult.metadata,
+            sharpCompositeS3Key: sharpResult.s3Key,
+            combinedFlow: true,
+            sharpDuration: sharpResult.metadata?.duration,
+            seedreamDuration: seedreamResult.metadata?.duration
+          },
+          cost: seedreamResult.cost // $0.08 for Seedream Edit
+        };
+      }
+    };
+  }
+
+  // COMBINED FLOW: Sharp Workflow + Nano Banana = Sharp composite + Nano Banana lighting
+  if (sharpWorkflowEnabled && compositorPreference === 'nanobanana') {
+    console.log('[Processor] 🎯 COMBINED FLOW: Sharp Workflow + Nano Banana');
+    console.log('[Processor] → Sharp composite (pixel-perfect) + Nano Banana lighting enhancement');
+
+    const sharpSettings = getSharpSettings();
+    const nanoBananaProvider = new NanoBananaCompositeProvider({
+      apiKey: process.env.NANOBANANA_API_KEY
+    });
+
+    // Return a wrapper that combines Sharp + Nano Banana
+    return {
+      compositeImage: async (params) => {
+        console.log('[Processor] Step 1/2: Sharp compositing...');
+
+        // Step 1: Sharp composite (pixel-perfect)
+        const sharpResult = await compositeImage({
+          maskS3Key: params.cutoutS3Key,
+          backgroundS3Key: params.backgroundS3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant,
+          options: {
+            ...sharpSettings,
+            ...params.options
+          }
+        });
+
+        if (!sharpResult.success) {
+          return {
+            success: false,
+            error: sharpResult.error,
+            metadata: sharpResult.metadata,
+            cost: 0
+          };
+        }
+
+        console.log('[Processor] Step 2/2: Nano Banana lighting enhancement...');
+
+        // Step 2: Nano Banana lighting enhancement (uses Sharp composite as input)
+        const nanoBananaResult = await nanoBananaProvider.enhanceLighting({
+          compositeS3Key: sharpResult.s3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant
+        });
+
+        // Return combined result
+        return {
+          success: nanoBananaResult.success,
+          s3Key: nanoBananaResult.s3Key,
+          s3Url: nanoBananaResult.s3Url,
+          error: nanoBananaResult.error,
+          metadata: {
+            ...nanoBananaResult.metadata,
+            sharpCompositeS3Key: sharpResult.s3Key,
+            combinedFlow: true,
+            sharpDuration: sharpResult.metadata?.duration,
+            nanobananaDuration: nanoBananaResult.metadata?.duration
+          },
+          cost: nanoBananaResult.cost // $0.03 for Nano Banana
+        };
+      }
+    };
+  }
+
+  // SHARP ONLY: Sharp Workflow without AI enhancement (OR compositor is 'none')
+  if (sharpWorkflowEnabled || compositorPreference === 'none') {
+    const reason = sharpWorkflowEnabled
+      ? 'Sharp Workflow ENABLED'
+      : 'Compositor set to "none"';
+
+    console.log(`[Processor] 🎯 ${reason} - using Sharp compositor (pixel-perfect, no AI)`);
+
+    // Get saved Sharp settings
+    const sharpSettings = getSharpSettings();
+
+    // Return a wrapper that adapts the Sharp workflow to the compositor interface
+    return {
+      compositeImage: async (params) => {
+        // Merge saved settings with passed options (passed options take priority)
+        const mergedOptions = {
+          ...sharpSettings,
+          ...params.options
+        };
+
+        console.log('[Processor] Using Sharp settings:', mergedOptions);
+
+        // Adapt parameters from AI compositor format to Sharp workflow format
+        const result = await compositeImage({
+          maskS3Key: params.cutoutS3Key,
+          backgroundS3Key: params.backgroundS3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant,
+          options: mergedOptions
+        });
+
+        // Return in AI compositor format
+        return {
+          success: result.success,
+          s3Key: result.s3Key,
+          s3Url: result.s3Url,
+          error: result.error,
+          metadata: result.metadata,
+          cost: 0 // Sharp is free
+        };
+      }
+    };
+  }
+
+  // If Sharp Workflow is NOT enabled, check compositor preference
+  const compositor = compositorPreference;
+
+  if (compositor === 'sharp') {
+    console.log('[Processor] Using Sharp compositor (pixel-perfect, no AI regeneration)');
+    // Return a wrapper that adapts the Sharp workflow to the compositor interface
+    return {
+      compositeImage: async (params) => {
+        // Adapt parameters from AI compositor format to Sharp workflow format
+        const result = await compositeImage({
+          maskS3Key: params.cutoutS3Key,
+          backgroundS3Key: params.backgroundS3Key,
+          sku: params.sku,
+          sha256: params.sha256,
+          theme: params.theme,
+          variant: params.variant,
+          options: params.options
+        });
+
+        // Return in AI compositor format
+        return {
+          success: result.success,
+          s3Key: result.s3Key,
+          s3Url: result.s3Url,
+          error: result.error,
+          metadata: result.metadata,
+          cost: 0 // Sharp is free
+        };
+      }
+    };
+  }
 
   if (compositor === 'nanobanana') {
-    console.log('[Processor] Using Nano Banana compositor (better text preservation)');
+    console.log('[Processor] Using Nano Banana compositor (AI with better text preservation)');
     return new NanoBananaCompositeProvider({
       apiKey: process.env.NANOBANANA_API_KEY
     });
   }
 
-  console.log('[Processor] Using Freepik Seedream compositor');
+  console.log('[Processor] Using Freepik Seedream compositor (AI generative)');
   return new FreepikCompositeProvider({
     apiKey: process.env.FREEPIK_API_KEY
   });
@@ -253,12 +469,20 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
 
     const backgrounds = [];
 
+    // Check if Sharp workflow is enabled (requires template)
+    const sharpWorkflowEnabled = getSharpWorkflowPreference();
+
     // Check if there's an active background template
     const activeTemplate = getActiveBackgroundTemplate();
 
-    if (activeTemplate) {
+    if (sharpWorkflowEnabled && !activeTemplate) {
+      // Sharp workflow requires a template to be selected
+      throw new Error('Sharp Workflow is enabled but no background template is selected. Please select a template in the Templates tab or disable Sharp Workflow.');
+    }
+
+    if (activeTemplate || sharpWorkflowEnabled) {
       // Use pre-generated backgrounds from active template
-      console.log(`[Processor] [${jobId}] Using active template: "${activeTemplate.name}" (${activeTemplate.id})`);
+      console.log(`[Processor] [${jobId}] Using active template: "${activeTemplate.name}" (${activeTemplate.id})${sharpWorkflowEnabled ? ' [Sharp Workflow]' : ''}`);
 
       const templateData = getTemplateWithAssets(activeTemplate.id, db, true); // onlySelected = true
       if (!templateData || !templateData.assets || templateData.assets.length === 0) {
@@ -275,7 +499,7 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
       console.log(`[Processor] [${jobId}] Using ${backgrounds.length} selected backgrounds from template (no generation cost)`);
 
     } else {
-      // No active template - generate new backgrounds per job
+      // No active template and Sharp workflow not enabled - generate new backgrounds per job
       console.log(`[Processor] [${jobId}] No active template - generating new backgrounds`);
 
       // Get user's custom background theme prompt
@@ -490,8 +714,70 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
       jobId
     );
 
-    // Step 6: Shopify Push (SKIPPED - not implemented yet)
-    console.log(`[Processor] [${jobId}] Step 6/7: Shopify Push (SKIPPED - no API yet)`);
+    // Step 6: Shopify Push
+    const step6Start = Date.now();
+    console.log(`[Processor] [${jobId}] Step 6/7: Shopify Push`);
+
+    try {
+      // Check if Shopify is configured
+      if (!process.env.SHOPIFY_ACCESS_TOKEN) {
+        console.log(`[Processor] [${jobId}] Shopify not configured - skipping push`);
+      } else {
+        // Find Shopify product by SKU
+        console.log(`[Processor] [${jobId}] Looking up Shopify product for SKU: ${job.sku}`);
+        const product = await findProductBySKU(job.sku, db);
+
+        if (!product) {
+          console.warn(`[Processor] [${jobId}] No Shopify product found for SKU: ${job.sku} - skipping push`);
+        } else {
+          // Get composite image URLs from S3
+          const compositeKeys = job.s3_composite_keys ? JSON.parse(job.s3_composite_keys) : [];
+
+          if (compositeKeys.length > 0) {
+            // Generate presigned URLs
+            const s3 = getS3Storage();
+            const imageUrls = await Promise.all(
+              compositeKeys.map(key => s3.getPresignedUrl(key, 3600)) // 1 hour expiry
+            );
+
+            // Upload images to Shopify
+            console.log(`[Processor] [${jobId}] Uploading ${imageUrls.length} images to Shopify product ${product.productId}`);
+            const uploadResults = await uploadProductImages(
+              product.productId,
+              imageUrls,
+              `${job.sku} - ${job.theme || 'Enhanced'}`
+            );
+
+            // Extract successful media IDs
+            const mediaIds = uploadResults
+              .filter(r => !r.error && r.id)
+              .map(r => r.id);
+
+            if (mediaIds.length > 0) {
+              // Update job with Shopify info
+              db.prepare(`
+                UPDATE jobs
+                SET shopify_product_id = ?,
+                    shopify_media_ids = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+              `).run(product.productId, JSON.stringify(mediaIds), jobId);
+
+              console.log(`[Processor] [${jobId}] ✅ Pushed ${mediaIds.length} images to Shopify`);
+            } else {
+              console.warn(`[Processor] [${jobId}] Failed to upload any images to Shopify`);
+            }
+          } else {
+            console.warn(`[Processor] [${jobId}] No composite images found - skipping Shopify push`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[Processor] [${jobId}] Shopify push error (non-fatal):`, error.message);
+      // Don't fail the job if Shopify push fails - continue to DONE status
+    }
+
+    const step6Duration = Date.now() - step6Start;
 
     // Step 7: Mark as DONE
     console.log(`[Processor] [${jobId}] Step 7/7: Completing job`);
@@ -513,6 +799,7 @@ async function processCutoutCompositeWorkflow(jobId, job, db) {
       compositing: `${step3Duration}ms`,
       derivatives: `${step4Duration}ms`,
       manifest: `${step5Duration}ms`,
+      shopify_push: `${step6Duration}ms`,
       total: `${totalDuration}ms`
     });
 

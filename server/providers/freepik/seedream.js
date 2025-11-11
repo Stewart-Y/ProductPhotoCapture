@@ -143,7 +143,7 @@ export class FreepikSeedreamProvider extends BaseProvider {
   /**
    * Submit edit request to Seedream 4 Edit API
    */
-  async submitEditRequest({ imageBuffer, prompt }) {
+  async submitEditRequest({ imageBuffer, prompt, guidanceScale = 7.5 }) {
     try {
       // Convert image buffer to base64
       const imageBase64 = imageBuffer.toString('base64');
@@ -152,7 +152,7 @@ export class FreepikSeedreamProvider extends BaseProvider {
       const payload = {
         prompt,
         reference_images: [imageBase64], // Array of base64 images (max 5)
-        guidance_scale: 7.5 // How closely to follow prompt (0-20, default 2.5)
+        guidance_scale: guidanceScale // How closely to follow prompt (0-20, default 7.5)
       };
 
       this.log('debug', 'Submitting edit request to Seedream 4 Edit API', {
@@ -349,6 +349,173 @@ export class FreepikSeedreamProvider extends BaseProvider {
       outdoors: 'Replace background with natural outdoor setting, wooden table, soft sunlight, blurred nature background with bokeh. Keep product centered and unchanged.',
       minimal: 'Replace background with pure minimalist background, solid color gradient, clean and simple. Keep product centered and unchanged.',
       luxury: 'Replace background with luxury dark background with gold accents, dramatic edge lighting, elegant atmosphere. Keep product centered and unchanged.'
+    };
+
+    return prompts[theme] || prompts.default;
+  }
+
+  /**
+   * Enhance lighting on an existing composite image
+   * Used for Sharp Workflow + Seedream combined flow
+   *
+   * @param {Object} params
+   * @param {string} params.compositeS3Key - S3 key for Sharp composite
+   * @param {string} params.sku - Product SKU
+   * @param {string} params.sha256 - Image hash
+   * @param {string} params.theme - Theme name
+   * @param {number} params.variant - Variant number
+   * @returns {Promise<Object>} Enhanced composite result
+   */
+  async enhanceLighting({
+    compositeS3Key,
+    sku,
+    sha256,
+    theme = 'default',
+    variant = 1
+  }) {
+    const startTime = Date.now();
+    this.log('info', 'Starting Seedream lighting enhancement', {
+      sku,
+      compositeS3Key,
+      theme,
+      variant
+    });
+
+    try {
+      const storage = getStorage();
+
+      // Step 1: Download Sharp composite from S3
+      this.log('info', 'Downloading Sharp composite from S3');
+      const compositeUrl = await storage.getPresignedGetUrl(compositeS3Key, 300);
+      const compositeBuffer = await this.downloadImage(compositeUrl);
+
+      this.log('info', 'Sharp composite downloaded', {
+        size: `${(compositeBuffer.length / 1024).toFixed(2)}KB`
+      });
+
+      // Step 2: Build lighting enhancement prompt
+      const prompt = this.getLightingPrompt(theme);
+
+      this.log('info', 'Using lighting enhancement prompt', {
+        prompt: prompt.substring(0, 100) + '...'
+      });
+
+      // Step 3: Submit edit request to Seedream 4 Edit API
+      const submissionResult = await this.submitEditRequest({
+        imageBuffer: compositeBuffer,
+        prompt,
+        guidanceScale: 3.0 // Lower guidance for subtle lighting changes
+      });
+
+      if (!submissionResult.success) {
+        return {
+          success: false,
+          error: submissionResult.error,
+          provider: this.name,
+          cost: 0
+        };
+      }
+
+      // Step 4: Poll for completion
+      const editResult = await this.pollForCompletion(submissionResult.taskId);
+
+      if (!editResult.success) {
+        return {
+          success: false,
+          error: editResult.error,
+          provider: this.name,
+          cost: 0
+        };
+      }
+
+      // Step 5: Download enhanced image
+      this.log('info', 'Downloading enhanced image');
+      const enhancedBuffer = await this.downloadImage(editResult.url);
+
+      // Step 6: Upload to S3 (final composite with lighting)
+      const enhancedS3Key = storage.getCompositeKey(
+        sku,
+        sha256,
+        theme,
+        '1x1',
+        variant,
+        'seedream-enhanced'
+      );
+
+      this.log('info', 'Uploading enhanced composite to S3', {
+        s3Key: enhancedS3Key,
+        size: enhancedBuffer.length
+      });
+
+      await storage.uploadBuffer(enhancedS3Key, enhancedBuffer, 'image/jpeg');
+
+      // Step 7: Generate presigned URL
+      const s3Url = await storage.getPresignedGetUrl(enhancedS3Key, 3600);
+
+      const duration = Date.now() - startTime;
+      const cost = this.calculateCost('edit');
+
+      this.log('info', 'Seedream lighting enhancement complete', {
+        sku,
+        theme,
+        s3Key: enhancedS3Key,
+        duration: `${duration}ms`,
+        cost: `$${cost.toFixed(4)}`
+      });
+
+      return {
+        success: true,
+        s3Key: enhancedS3Key,
+        s3Url,
+        provider: this.name,
+        cost,
+        metadata: {
+          duration,
+          theme,
+          prompt,
+          workflow: 'sharp_seedream_lighting',
+          sharpCompositeS3Key: compositeS3Key,
+          combinedFlow: true
+        }
+      };
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.log('error', 'Seedream lighting enhancement failed', {
+        sku,
+        error: error.message,
+        duration: `${duration}ms`
+      });
+
+      return {
+        success: false,
+        error: error.message,
+        provider: this.name,
+        cost: 0
+      };
+    }
+  }
+
+  /**
+   * Get lighting enhancement prompts (more subtle than background replacement)
+   * Following Seedream 4.0 / SeedEdit 3.0 best practices:
+   * - Use "provided image" language
+   * - Explicit preservation guardrails
+   * - Specific lighting technical details
+   * - Avoid global "enhance" or denoise on subject
+   * - Focus on scene/background lighting changes only
+   */
+  getLightingPrompt(theme) {
+    const prompts = {
+      default: 'Using the provided image, adjust only the scene lighting to a neutral white seamless studio: soft, even illumination, gentle overhead softbox feel with a faint grounded shadow behind/under the bottle. Keep the bottle and its label pixel-accurate and unchanged—preserve label text, logos, edges, glass texture, and colors exactly. Do not modify the bottle at all. Limit edits to lighting, exposure, and shadows in the background and scene only.',
+
+      kitchen: 'Using the provided image, match lighting to a warm indoor bar atmosphere: approximately 3000K tungsten ambiance, soft side light from the background, mild vignette, and background-only color balance shift. Leave the bottle untouched—preserve all label typography, embossing, cap details, and reflections. Add a subtle contact shadow on the surface consistent with the new light direction. Do not alter label typography, colors, shapes, or edges.',
+
+      outdoors: 'Using the provided image, set bright outdoor daylight: cool sky fill with ~5500K color temperature, a single sun key producing a clean, directional shadow behind the bottle, and crisp contrast in the background only. Adjust only the lighting to midday outdoor sunlight with brighter exposure, cool ambient fill, and a defined ground shadow consistent with noon sun. Do not regenerate or stylize the bottle—keep all label text and graphics intact. Preserve the bottle pixels exactly—no generative changes to the subject.',
+
+      minimal: 'Using the provided image, adjust only the background lighting to a bright, neutral white studio look. Add a soft overhead softbox feel and a faint grounded shadow behind/under the bottle. Keep the scene soft and minimalist with clean studio lighting and subtle gradients. Do not modify the bottle at all—preserve label text, logos, edges, glass texture, and colors exactly. Keep noise reduction minimal and avoid generative fill on the bottle.',
+
+      luxury: 'Using the provided image, apply dramatic premium lighting in the background with controlled contrast: subtle neon night ambiance with soft magenta/teal rim cues and a gentle specular bloom away from the bottle. Add elegant shadow play and a low-angle key light creating upscale atmosphere. Maintain realistic exposure so the bottle remains readable. Preserve the bottle 100%—no alterations to lettering, logo edges, foil, or cap. Limit edits to lighting and shadows in the background only.'
     };
 
     return prompts[theme] || prompts.default;

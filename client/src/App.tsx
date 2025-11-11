@@ -6,6 +6,7 @@ import Settings from './pages/Settings';
 import BackgroundTemplates from './pages/BackgroundTemplates';
 import WebhookSimulator from './pages/WebhookSimulator';
 import ShopifyIntegration from './pages/ShopifyIntegration';
+import Enhance from './pages/Enhance';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopBar } from './components/layout/TopBar';
 
@@ -29,6 +30,7 @@ function App() {
             <Route path="/templates" element={<BackgroundTemplates />} />
             <Route path="/webhook" element={<WebhookSimulator />} />
             <Route path="/shopify" element={<ShopifyIntegration />} />
+            <Route path="/enhance" element={<Enhance />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
