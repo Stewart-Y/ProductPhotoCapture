@@ -174,7 +174,7 @@ async function generateTemplateVariant({
     const result = await provider.generateBackground({
       theme,
       customPrompt,
-      sku: `TEMPLATE_${finalTemplateId}`,
+      sku: `TEMPLATE_${templateId}`,
       sha256: templateId,
       dimensions: { width: 2048, height: 2048 },
       aspectRatio: 'square_1_1',
@@ -187,7 +187,7 @@ async function generateTemplateVariant({
 
     // Store asset in database
     const storage = getStorage();
-    const templateS3Key = `templates/${finalTemplateId}/${variant}.jpg`;
+    const templateS3Key = `templates/${templateId}/${variant}.jpg`;
 
     // Copy from backgrounds/ to templates/ location
     // (The provider already uploaded to backgrounds/, we'll reference it)
@@ -264,7 +264,7 @@ export async function regenerateTemplateVariants({
     `).get(templateId);
 
     if (!template) {
-      throw new Error(`Template not found: ${finalTemplateId}`);
+      throw new Error(`Template not found: ${templateId}`);
     }
 
     // Get current max variant number
@@ -365,7 +365,7 @@ export async function refreshTemplateAssetUrls(finalTemplateId, db) {
 
   const assets = db.prepare(`
     SELECT * FROM template_assets WHERE template_id = ?
-  `).all(templateId);
+  `).all(finalTemplateId);
 
   for (const asset of assets) {
     const newUrl = await storage.getPresignedGetUrl(asset.s3_key, 3600);
@@ -379,7 +379,7 @@ export async function refreshTemplateAssetUrls(finalTemplateId, db) {
   }
 
   console.log('[TemplateGenerator] Refreshed presigned URLs', {
-    templateId,
+    templateId: finalTemplateId,
     assetCount: assets.length
   });
 
