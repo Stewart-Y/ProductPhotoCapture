@@ -5,7 +5,7 @@
  */
 
 import { useState } from 'react';
-import { ArrowUpIcon, SparklesIcon, Upload } from 'lucide-react';
+import { SparklesIcon, Upload } from 'lucide-react';
 
 interface Enhancement {
   id: string;

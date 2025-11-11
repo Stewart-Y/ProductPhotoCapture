@@ -77,6 +77,8 @@ export interface Job {
   derivatives_ms: number | null;
   manifest_ms: number | null;
   workflow_type?: string; // 'cutout_composite' or 'seedream_edit'
+  provider_metadata?: Record<string, any> | null;
+  metadata?: Record<string, any> | null;
 }
 
 export interface JobFilters {
