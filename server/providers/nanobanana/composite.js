@@ -1,14 +1,16 @@
 /**
- * Nano Banana AI Composite Provider (via OpenRouter)
+ * Nano Banana Pro AI Composite Provider (via OpenRouter)
  *
- * Uses Google's Gemini 2.5 Flash Image (Nano Banana) via OpenRouter
+ * Uses Google's Gemini 3 Pro Image (Nano Banana Pro) via OpenRouter
  * to intelligently composite product cutouts onto background scenes.
  *
  * Key Features:
- * - Superior text/label preservation (better for product bottles)
- * - Realistic product placement
+ * - Industry-leading text/label preservation (best for product bottles)
+ * - Superior multimodal reasoning and real-world grounding
+ * - High-fidelity visual synthesis with 2K/4K support
+ * - Consistent multi-image blending with identity preservation
+ * - Fine-grained creative controls (localized edits, lighting, focus)
  * - Fast processing via OpenRouter's reliable infrastructure
- * - Cost: $0.03 per image
  */
 
 import fetch from 'node-fetch';
@@ -23,11 +25,11 @@ export class NanoBananaCompositeProvider {
 
     this.apiKey = apiKey;
     this.apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
-    this.modelId = 'google/gemini-2.5-flash-image';
+    this.modelId = 'google/gemini-3-pro-image-preview';
   }
 
   /**
-   * AI-powered composite using Nano Banana
+   * AI-powered composite using Nano Banana Pro
    *
    * @param {Object} params
    * @param {string} params.cutoutS3Key - S3 key for product cutout (transparent PNG)
@@ -50,7 +52,7 @@ export class NanoBananaCompositeProvider {
   }) {
     const startTime = Date.now();
 
-    console.log('[NanoBanana] Starting AI-powered composite', {
+    console.log('[NanoBananaPro] Starting AI-powered composite', {
       sku,
       theme,
       cutoutS3Key,
@@ -61,19 +63,19 @@ export class NanoBananaCompositeProvider {
       const storage = getStorage();
 
       // Step 1: Download cutout and background from S3
-      console.log('[NanoBanana] Downloading images from S3...');
+      console.log('[NanoBananaPro] Downloading images from S3...');
       const [cutoutBuffer, backgroundBuffer] = await Promise.all([
         this.downloadFromS3(storage, cutoutS3Key),
         this.downloadFromS3(storage, backgroundS3Key)
       ]);
 
-      console.log('[NanoBanana] Downloaded:', {
+      console.log('[NanoBananaPro] Downloaded:', {
         cutoutSize: `${(cutoutBuffer.length / 1024).toFixed(2)}KB`,
         backgroundSize: `${(backgroundBuffer.length / 1024).toFixed(2)}KB`
       });
 
       // Step 2: Resize images to max 2048px (Nano Banana limit)
-      console.log('[NanoBanana] Resizing images to 2048px max...');
+      console.log('[NanoBananaPro] Resizing images to 2048px max...');
       const [resizedCutout, resizedBackground] = await Promise.all([
         sharp(cutoutBuffer)
           .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
@@ -85,7 +87,7 @@ export class NanoBananaCompositeProvider {
           .toBuffer()
       ]);
 
-      console.log('[NanoBanana] Resized:', {
+      console.log('[NanoBananaPro] Resized:', {
         cutoutSize: `${(resizedCutout.length / 1024).toFixed(2)}KB`,
         backgroundSize: `${(resizedBackground.length / 1024).toFixed(2)}KB`
       });
@@ -107,7 +109,7 @@ export class NanoBananaCompositeProvider {
         prompt = this.buildCompositePrompt(theme);
       }
 
-      console.log('[NanoBanana] Submitting to Nano Banana AI...', {
+      console.log('[NanoBananaPro] Submitting to Nano Banana AI...', {
         prompt: prompt.substring(0, 100) + '...',
         isSimpleBackground
       });
@@ -124,7 +126,7 @@ export class NanoBananaCompositeProvider {
         throw new Error(result.error || 'AI composite failed');
       }
 
-      console.log('[NanoBanana] AI generation complete, downloading result...');
+      console.log('[NanoBananaPro] AI generation complete, downloading result...');
 
       // Step 6: Download generated composite (already base64)
       const compositeBuffer = Buffer.from(result.imageBase64, 'base64');
@@ -134,7 +136,7 @@ export class NanoBananaCompositeProvider {
       const type = options.type || 'master';
       const compositeS3Key = storage.getCompositeKey(sku, sha256, theme, aspect, variant, 'nanobanana');
 
-      console.log('[NanoBanana] Uploading to S3:', compositeS3Key);
+      console.log('[NanoBananaPro] Uploading to S3:', compositeS3Key);
       await storage.uploadBuffer(compositeS3Key, compositeBuffer, 'image/jpeg');
 
       // Step 8: Generate presigned URL
@@ -142,12 +144,12 @@ export class NanoBananaCompositeProvider {
 
       const duration = Date.now() - startTime;
 
-      console.log('[NanoBanana] Composite complete:', {
+      console.log('[NanoBananaPro] Composite complete:', {
         sku,
         theme,
         s3Key: compositeS3Key,
         duration: `${duration}ms`,
-        cost: '$0.0300' // Nano Banana cost per generation
+        cost: '$0.0300' // Nano Banana Pro cost per generation
       });
 
       return {
@@ -157,16 +159,16 @@ export class NanoBananaCompositeProvider {
         metadata: {
           duration,
           size: compositeBuffer.length,
-          provider: 'nanobanana',
-          model: 'gemini-2.5-flash-image'
+          provider: 'nanobanana-pro',
+          model: 'gemini-3-pro-image-preview'
         },
-        cost: 0.03 // $0.03 per Nano Banana generation
+        cost: 0.03 // $0.03 per Nano Banana Pro generation
       };
 
     } catch (error) {
       const duration = Date.now() - startTime;
 
-      console.error('[NanoBanana] Composite failed:', {
+      console.error('[NanoBananaPro] Composite failed:', {
         sku,
         theme,
         error: error.message,
@@ -352,7 +354,7 @@ export class NanoBananaCompositeProvider {
       return Buffer.from(arrayBuffer);
 
     } catch (error) {
-      console.error('[NanoBanana] S3 download failed:', { s3Key, error: error.message });
+      console.error('[NanoBananaPro] S3 download failed:', { s3Key, error: error.message });
       throw error;
     }
   }
@@ -381,7 +383,7 @@ export class NanoBananaCompositeProvider {
       // Threshold: < 100 is very simple (solid colors, gradients)
       const isSimple = avgVariance < 100;
 
-      console.log('[NanoBanana] Background complexity analysis:', {
+      console.log('[NanoBananaPro] Background complexity analysis:', {
         avgVariance: avgVariance.toFixed(2),
         isSimple,
         threshold: 100
@@ -390,7 +392,7 @@ export class NanoBananaCompositeProvider {
       return isSimple;
 
     } catch (error) {
-      console.error('[NanoBanana] Background analysis failed:', error.message);
+      console.error('[NanoBananaPro] Background analysis failed:', error.message);
       return false; // Default to complex if analysis fails
     }
   }
@@ -413,7 +415,7 @@ export class NanoBananaCompositeProvider {
 
   /**
    * Universal composite prompt (no shadows, background-only lighting adjustments)
-   * Following Google's official Gemini 2.5 Flash best practices:
+   * Following Google's official Gemini 3 Pro best practices:
    * - Descriptive narrative style (not keyword lists or structured tasks)
    * - Explicit multi-image reference syntax
    * - Conversational scene descriptions
@@ -465,7 +467,7 @@ export class NanoBananaCompositeProvider {
   }) {
     const startTime = Date.now();
 
-    console.log('[NanoBanana] Starting lighting enhancement', {
+    console.log('[NanoBananaPro] Starting lighting enhancement', {
       sku,
       compositeS3Key,
       theme,
@@ -476,16 +478,16 @@ export class NanoBananaCompositeProvider {
       const storage = getStorage();
 
       // Step 1: Download Sharp composite from S3
-      console.log('[NanoBanana] Downloading Sharp composite from S3');
+      console.log('[NanoBananaPro] Downloading Sharp composite from S3');
       const compositeUrl = await storage.getPresignedGetUrl(compositeS3Key, 300);
       const compositeBuffer = await this.downloadFromS3(storage, compositeS3Key);
 
-      console.log('[NanoBanana] Sharp composite downloaded', {
+      console.log('[NanoBananaPro] Sharp composite downloaded', {
         size: `${(compositeBuffer.length / 1024).toFixed(2)}KB`
       });
 
       // Step 2: Resize to max 2048px (Nano Banana limit)
-      console.log('[NanoBanana] Resizing composite to 2048px max...');
+      console.log('[NanoBananaPro] Resizing composite to 2048px max...');
       const resizedComposite = await sharp(compositeBuffer)
         .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 90 })
@@ -497,7 +499,7 @@ export class NanoBananaCompositeProvider {
       // Step 4: Build lighting enhancement prompt
       const prompt = this.getLightingPrompt(theme);
 
-      console.log('[NanoBanana] Using lighting enhancement prompt', {
+      console.log('[NanoBananaPro] Using lighting enhancement prompt', {
         prompt: prompt.substring(0, 100) + '...'
       });
 
@@ -516,7 +518,7 @@ export class NanoBananaCompositeProvider {
         };
       }
 
-      console.log('[NanoBanana] AI lighting enhancement complete');
+      console.log('[NanoBananaPro] AI lighting enhancement complete');
 
       // Step 6: Download enhanced image
       const enhancedBuffer = Buffer.from(result.imageBase64, 'base64');
@@ -531,7 +533,7 @@ export class NanoBananaCompositeProvider {
         'nanobanana-enhanced'
       );
 
-      console.log('[NanoBanana] Uploading enhanced composite to S3', {
+      console.log('[NanoBananaPro] Uploading enhanced composite to S3', {
         s3Key: enhancedS3Key,
         size: enhancedBuffer.length
       });
@@ -543,7 +545,7 @@ export class NanoBananaCompositeProvider {
 
       const duration = Date.now() - startTime;
 
-      console.log('[NanoBanana] Lighting enhancement complete:', {
+      console.log('[NanoBananaPro] Lighting enhancement complete:', {
         sku,
         theme,
         s3Key: enhancedS3Key,
@@ -569,7 +571,7 @@ export class NanoBananaCompositeProvider {
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error('[NanoBanana] Lighting enhancement failed', {
+      console.error('[NanoBananaPro] Lighting enhancement failed', {
         sku,
         error: error.message,
         duration: `${duration}ms`
@@ -721,7 +723,7 @@ export class NanoBananaCompositeProvider {
 
   /**
    * Get lighting enhancement prompts (more subtle than full composite)
-   * Following Nano Banana (Gemini 2.5 Flash) best practices:
+   * Following Nano Banana Pro (Gemini 3 Pro) best practices:
    * - Conversational, detailed language
    * - Explicit preservation cues ("keep bottle unchanged")
    * - Specific lighting details (color temp, direction, style)
